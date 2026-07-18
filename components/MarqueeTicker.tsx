@@ -2,6 +2,7 @@
 
 const serviceItems = [
   { icon: "✦", text: "Facials" },
+  { icon: "❀", text: "Japanese Rituals" },
   { icon: "◈", text: "Cleanups" },
   { icon: "◉", text: "D-Tan" },
   { icon: "◌", text: "Bleach" },

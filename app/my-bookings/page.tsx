@@ -1,6 +1,7 @@
 "use client";
 import { useEffect, useState } from "react";
 import { supabase } from "../../lib/supabase";
+import { getPublicSettings } from "../../lib/settings";
 import { useRouter } from "next/navigation";
 import { User, Mail, Phone, Calendar, Lock, Star, PhoneCall, MessageCircle, MapPin, Clock, LogOut, Pencil, X, Check, KeyRound, Eye, EyeOff, ShieldCheck } from "lucide-react";
 
@@ -28,7 +29,7 @@ const FAQS = [
   },
   {
     q: "Can I cancel or reschedule my appointment?",
-    a: "Please call or WhatsApp us at +91 98765 43210 at least 24 hours before your appointment to cancel or reschedule. Last-minute cancellations may not be accommodated.",
+    a: "Please call or WhatsApp us at least 24 hours before your appointment to cancel or reschedule. Last-minute cancellations may not be accommodated.",
   },
   {
     q: "How does the Home Service work?",
@@ -47,12 +48,18 @@ const FAQS = [
 export default function MyBookings() {
   const router = useRouter();
   const [tab, setTab] = useState<"bookings" | "profile" | "help">("bookings");
+  const [siteSettings, setSiteSettings] = useState<Record<string, string>>({});
 
   useEffect(() => {
     if (typeof window !== "undefined" && new URLSearchParams(window.location.search).get("tab") === "profile") {
       setTab("profile");
     }
+    getPublicSettings().then(setSiteSettings);
   }, []);
+
+  const salonPhone = siteSettings.salon_phone || "+91 96259 28495";
+  const salonPhoneDigits = salonPhone.replace(/[^\d+]/g, "");
+  const waNumber = (siteSettings.owner_whatsapp || "919625928495").replace(/\D/g, "");
   const [bookings, setBookings] = useState<Booking[]>([]);
   const [loading, setLoading] = useState(true);
   const [userName, setUserName] = useState("");
@@ -608,11 +615,11 @@ export default function MyBookings() {
                 <div className="mb-contact-title">Still need help?</div>
                 <div className="mb-contact-row">
                   <div className="mb-contact-icon"><PhoneCall size={16}/></div>
-                  <span>Call us: <a href="tel:+919876543210">+91 98765 43210</a></span>
+                  <span>Call us: <a href={`tel:${salonPhoneDigits}`}>{salonPhone}</a></span>
                 </div>
                 <div className="mb-contact-row">
                   <div className="mb-contact-icon"><MessageCircle size={16}/></div>
-                  <span>WhatsApp: <a href="https://wa.me/919876543210?text=Hello%20Bella%20%26%20Guy%20Salon%2C%20I%20need%20help." target="_blank" rel="noreferrer">+91 98765 43210</a></span>
+                  <span>WhatsApp: <a href={`https://wa.me/${waNumber}?text=${encodeURIComponent("Hello Bella & Guy Salon, I need help.")}`} target="_blank" rel="noreferrer">{salonPhone}</a></span>
                 </div>
                 <div className="mb-contact-row">
                   <div className="mb-contact-icon"><MapPin size={16}/></div>

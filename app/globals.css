@@ -15,6 +15,35 @@
   --cream-deep: #F2EDE3;
 }
 
+/* ── InquiryButton (Ask About This Service / Make an Inquiry) ── */
+.iqb-outline {
+  display: inline-flex; align-items: center; gap: 7px;
+  background: transparent; border: 1.5px solid rgba(201,168,76,0.45);
+  color: #C9A84C; border-radius: 10px; padding: 11px 22px;
+  font-size: 12.5px; font-weight: 700; letter-spacing: 0.04em;
+  cursor: pointer; font-family: 'Inter', sans-serif; transition: all 0.25s ease;
+}
+.iqb-outline:hover { background: rgba(201,168,76,0.1); border-color: #C9A84C; }
+.iqb-text {
+  display: inline-flex; align-items: center; gap: 6px;
+  background: none; border: none; color: #8a6a1a;
+  font-size: 12.5px; font-weight: 700; cursor: pointer;
+  font-family: 'Inter', sans-serif; text-decoration: underline;
+  text-underline-offset: 3px; padding: 4px 0;
+}
+.iqb-floating {
+  position: fixed; right: 32px; bottom: 140px; z-index: 998;
+  display: inline-flex; align-items: center; gap: 8px;
+  background: #080808; color: #E8C96D; border: 1px solid rgba(201,168,76,0.4);
+  border-radius: 30px; padding: 12px 18px; box-shadow: 0 10px 30px rgba(0,0,0,0.3);
+  font-size: 12.5px; font-weight: 700; cursor: pointer; font-family: 'Inter', sans-serif;
+}
+.iqb-floating:hover { background: #1a1200; }
+@media (max-width: 600px) {
+  .iqb-floating span.iqb-floating-label { display: none; }
+  .iqb-floating { padding: 12px; border-radius: 50%; right: 32px; bottom: 130px; }
+}
+
 * { box-sizing: border-box; margin: 0; padding: 0; }
 html, body { scroll-behavior: smooth; }
 /* Per-element scroll offset — clears the sticky navbar (80px max) on every browser */

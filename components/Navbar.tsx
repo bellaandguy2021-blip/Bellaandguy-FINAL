@@ -3,7 +3,8 @@
 import { useState, useEffect, useRef } from "react";
 import Image from "next/image";
 import { supabase } from "../lib/supabase";
-import { CalendarDays, User, LogOut, Phone, ChevronDown } from "lucide-react";
+import { CalendarDays, User, LogOut, Phone, ChevronDown, ShoppingBag } from "lucide-react";
+import { useCart } from "./CartProvider";
 
 export default function Navbar() {
   const [scrolled, setScrolled] = useState(false);
@@ -14,6 +15,7 @@ export default function Navbar() {
   const [customerEmail, setCustomerEmail] = useState("");
   const [profileOpen, setProfileOpen] = useState(false);
   const profileRef = useRef<HTMLDivElement>(null);
+  const { count, openCart } = useCart();
 
   useEffect(() => {
     supabase.auth.getSession().then(({ data: { session } }) => {
@@ -76,7 +78,7 @@ export default function Navbar() {
     { label: "Gallery", href: "#gallery", id: "gallery" },
     { label: "Reviews", href: "#reviews", id: "reviews" },
     { label: "Contact", href: "#contact", id: "contact" },
-    { label: "T&C", href: "/terms", id: "terms" },
+    { label: "About Us", href: "/about", id: "about" },
   ];
 
   const menuItems = [
@@ -362,6 +364,28 @@ export default function Navbar() {
                 </a>
               )}
             </div>
+
+            {/* Cart icon — always visible, opens the cart drawer */}
+            <button
+              onClick={openCart}
+              aria-label="Open cart"
+              style={{
+                position: "relative", background: "none", border: "none", cursor: "pointer",
+                color: "#C9A84C", display: "flex", alignItems: "center", padding: 6,
+              }}
+            >
+              <ShoppingBag size={19} />
+              {count > 0 && (
+                <span style={{
+                  position: "absolute", top: -2, right: -2, background: "#C9A84C", color: "#080808",
+                  borderRadius: 20, minWidth: 16, height: 16, padding: "0 3px",
+                  display: "flex", alignItems: "center", justifyContent: "center",
+                  fontSize: 9.5, fontWeight: 800,
+                }}>
+                  {count}
+                </span>
+              )}
+            </button>
 
             {/* Mobile hamburger */}
             <button className="mobile-btn" onClick={() => setMenuOpen(!menuOpen)}

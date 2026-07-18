@@ -1,8 +1,9 @@
 "use client";
 import Image from "next/image";
-import { useState, useEffect, useRef, useCallback } from "react";
+import { useState, useEffect, useRef, useCallback, useMemo } from "react";
+import { getGalleryImages, DBGalleryImage } from "@/lib/homepageContent";
 
-const slides = [
+export const slides = [
   {
     src: "/images/salon-exterior.jpg",
     fallback: "/images/salon-front.jpg",
@@ -41,7 +42,34 @@ const slides = [
   },
 ];
 
+type Slide = { src: string; fallback: string; label: string; sub: string };
+
 const INTERVAL = 4200;
+// Photos at least this much wider than tall get their own full-width slide —
+// they fill the wide slider naturally with a normal photographic crop.
+// Anything narrower (portrait / square photos) would need heavy cropping to
+// fill the same wide box, so those get grouped 2-3 across instead, each in
+// its own narrower panel closer to its natural shape.
+const WIDE_RATIO = 1.35;
+
+/** Groups slides into rows: wide photos go solo, narrower photos cluster up to 3 per row. */
+function groupSlides(list: Slide[], ratios: Record<string, number>): Slide[][] {
+  const groups: Slide[][] = [];
+  let buffer: Slide[] = [];
+  const flushBuffer = () => { if (buffer.length) { groups.push(buffer); buffer = []; } };
+  for (const s of list) {
+    const ratio = ratios[s.src] ?? WIDE_RATIO; // unknown yet → treat as wide until measured
+    if (ratio >= WIDE_RATIO) {
+      flushBuffer();
+      groups.push([s]);
+    } else {
+      buffer.push(s);
+      if (buffer.length === 3) flushBuffer();
+    }
+  }
+  flushBuffer();
+  return groups;
+}
 
 export default function Gallery() {
   const [current, setCurrent] = useState(0);
@@ -53,6 +81,62 @@ export default function Gallery() {
   const progressRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const startTimeRef = useRef<number>(Date.now());
 
+  const [dbImages, setDbImages] = useState<DBGalleryImage[]>([]);
+  useEffect(() => { getGalleryImages().then(setDbImages); }, []);
+
+  // Admin-managed photos (from the "Homepage" tab) take over entirely once any
+  // exist, same rule as the rest of the homepage manager content.
+  const rawItems: Slide[] = dbImages.length > 0
+    ? dbImages.map(g => ({ src: g.src, fallback: g.src, label: g.label ?? "", sub: g.sub ?? "" }))
+    : slides;
+  const itemsKey = rawItems.map(i => i.src).join("|");
+  // Stable reference across renders (changes only when the actual photo list
+  // changes) — without this, groupSlides below would rerun on every render.
+  const items = useMemo(() => rawItems, [itemsKey]);
+
+  // Measure each photo's real aspect ratio once so wide vs. narrow photos can
+  // be grouped correctly (see WIDE_RATIO above) instead of guessing.
+  const [ratios, setRatios] = useState<Record<string, number>>({});
+  useEffect(() => {
+    let cancelled = false;
+    items.forEach(it => {
+      if (ratios[it.src] !== undefined) return;
+      const img = new window.Image();
+      img.onload = () => { if (!cancelled) setRatios(r => ({ ...r, [it.src]: img.naturalWidth / img.naturalHeight })); };
+      img.onerror = () => { if (!cancelled) setRatios(r => ({ ...r, [it.src]: WIDE_RATIO })); };
+      img.src = it.src;
+    });
+    return () => { cancelled = true; };
+  }, [items, ratios]);
+
+  // Only regroup once every photo's ratio is known — grouping mid-stream (as
+  // ratios trickle in one at a time) would silently reshuffle which photos
+  // share a slide while someone might be actively viewing one of them.
+  const allMeasured = items.every(it => ratios[it.src] !== undefined);
+  const groups = useMemo(
+    () => allMeasured ? groupSlides(items, ratios) : items.map(it => [it]),
+    [items, allMeasured, ratios]
+  );
+
+  // If regrouping does change the slide layout (e.g. once `allMeasured` flips
+  // true), keep showing the same photo the visitor was on instead of jumping
+  // to whatever now occupies that index.
+  const prevGroupsRef = useRef(groups);
+  useEffect(() => {
+    if (prevGroupsRef.current !== groups) {
+      const viewedSrc = prevGroupsRef.current[current]?.[0]?.src;
+      const newIndex = viewedSrc ? groups.findIndex(g => g.some(s => s.src === viewedSrc)) : -1;
+      prevGroupsRef.current = groups;
+      if (newIndex !== -1 && newIndex !== current) {
+        setCurrent(newIndex);
+        setPrev(null);
+      } else {
+        setCurrent(c => Math.min(c, Math.max(groups.length - 1, 0)));
+      }
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [groups]);
+
   const goTo = useCallback((idx: number) => {
     if (animating) return;
     setAnimating(true);
@@ -63,15 +147,15 @@ export default function Gallery() {
     setTimeout(() => { setPrev(null); setAnimating(false); }, 700);
   }, [animating, current]);
 
-  const next = useCallback(() => goTo((current + 1) % slides.length), [goTo, current]);
-  const prev_ = useCallback(() => goTo((current - 1 + slides.length) % slides.length), [goTo, current]);
+  const next = useCallback(() => goTo((current + 1) % groups.length), [goTo, current, groups.length]);
+  const prev_ = useCallback(() => goTo((current - 1 + groups.length) % groups.length), [goTo, current, groups.length]);
 
   // Auto-advance
   useEffect(() => {
-    if (paused) return;
+    if (paused || groups.length < 2) return;
     timerRef.current = setTimeout(next, INTERVAL);
     return () => { if (timerRef.current) clearTimeout(timerRef.current); };
-  }, [current, paused, next]);
+  }, [current, paused, next, groups.length]);
 
   // Progress bar
   useEffect(() => {
@@ -85,10 +169,11 @@ export default function Gallery() {
     return () => { if (progressRef.current) clearInterval(progressRef.current); };
   }, [current, paused]);
 
-  const [imgSrcs, setImgSrcs] = useState<string[]>(slides.map(s => s.src));
-  function handleImgError(i: number) {
-    setImgSrcs(prev => { const n = [...prev]; n[i] = slides[i].fallback; return n; });
+  const [imgSrcs, setImgSrcs] = useState<Record<string, string>>({});
+  function handleImgError(slide: Slide) {
+    setImgSrcs(m => ({ ...m, [slide.src]: slide.fallback }));
   }
+  const srcFor = (slide: Slide) => imgSrcs[slide.src] ?? slide.src;
 
   return (
     <>
@@ -122,6 +207,11 @@ export default function Gallery() {
         .gl-slide.leaving { opacity: 0; z-index: 1; }
         .gl-slide.hidden  { opacity: 0; z-index: 0; }
 
+        /* Row of 1-3 photos side by side */
+        .gl-slide-row { position: absolute; inset: 0; display: flex; }
+        .gl-slide-cell { position: relative; flex: 1; min-width: 0; height: 100%; }
+        .gl-slide-cell + .gl-slide-cell { border-left: 1px solid rgba(255,255,255,0.08); }
+
         /* Ken-Burns zoom on active slide */
         .gl-slide.active .gl-img {
           animation: glKenBurns 5s ease-in-out forwards;
@@ -131,7 +221,7 @@ export default function Gallery() {
           to   { transform: scale(1.0); }
         }
 
-        .gl-img { width: 100%; height: 100%; object-fit: cover; display: block; }
+        .gl-img { object-fit: cover; }
 
         /* Gradient overlays */
         .gl-overlay-bottom {
@@ -276,29 +366,34 @@ export default function Gallery() {
           onMouseEnter={() => setPaused(true)}
           onMouseLeave={() => { setPaused(false); startTimeRef.current = Date.now() - progress / 100 * INTERVAL; }}
         >
-          {slides.map((slide, i) => (
+          {groups.map((group, i) => (
             <div
-              key={i}
+              key={`slide-${i}`}
               className={`gl-slide ${i === current ? "active" : i === prev ? "leaving" : "hidden"}`}
             >
-              <Image
-                src={imgSrcs[i]}
-                alt={slide.label}
-                fill
-                className="gl-img"
-                style={{ objectFit: "cover" }}
-                priority={i === 0}
-                onError={() => handleImgError(i)}
-              />
+              <div className="gl-slide-row">
+                {group.map((slide, gi) => (
+                  <div key={`${i}-${gi}`} className="gl-slide-cell">
+                    <Image
+                      src={srcFor(slide)}
+                      alt={slide.label}
+                      fill
+                      className="gl-img"
+                      priority={i === 0 && gi === 0}
+                      onError={() => handleImgError(slide)}
+                    />
+                  </div>
+                ))}
+              </div>
               <div className="gl-overlay-bottom" />
               <div className="gl-overlay-left" />
               <div className="gl-caption">
                 <div className="gl-caption-text">
-                  <div className="gl-caption-label">{slide.label}</div>
-                  <div className="gl-caption-sub">{slide.sub}</div>
+                  <div className="gl-caption-label">{group[0].label}</div>
+                  <div className="gl-caption-sub">{group[0].sub}</div>
                 </div>
                 <div className="gl-dots">
-                  {slides.map((_, d) => (
+                  {groups.map((_, d) => (
                     <button key={d} className={`gl-dot ${d === current ? "on" : ""}`} onClick={() => goTo(d)} />
                   ))}
                 </div>
@@ -310,7 +405,7 @@ export default function Gallery() {
           <div className="gl-progress" style={{ width: `${progress}%` }} />
 
           {/* Counter */}
-          <div className="gl-counter"><span>{current + 1}</span> / {slides.length}</div>
+          <div className="gl-counter"><span>{current + 1}</span> / {groups.length}</div>
 
           {/* Arrows */}
           <button className="gl-arrow gl-prev" onClick={e => { e.stopPropagation(); prev_(); }}>‹</button>
@@ -319,9 +414,9 @@ export default function Gallery() {
 
         {/* Thumbnail strip */}
         <div className="gl-thumbs">
-          {slides.map((slide, i) => (
-            <div key={i} className={`gl-thumb ${i === current ? "on" : ""}`} onClick={() => goTo(i)}>
-              <Image src={imgSrcs[i]} alt={slide.label} fill style={{ objectFit: "cover" }} onError={() => handleImgError(i)} />
+          {groups.map((group, i) => (
+            <div key={`thumb-${i}`} className={`gl-thumb ${i === current ? "on" : ""}`} onClick={() => goTo(i)}>
+              <Image src={srcFor(group[0])} alt={group[0].label} fill style={{ objectFit: "cover" }} onError={() => handleImgError(group[0])} />
               <div className="gl-thumb-overlay" />
               <div className="gl-thumb-bar" />
             </div>

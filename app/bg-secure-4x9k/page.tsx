@@ -5,7 +5,16 @@ import jsPDF from "jspdf";
 import autoTable from "jspdf-autotable";
 import { useRouter } from "next/navigation";
 import { supabaseAdmin as supabase } from "../../lib/supabaseAdmin";
-import { allCategories } from "../../lib/servicesData";
+import { allCategories as staticCategories, Category } from "../../lib/servicesData";
+import { getDynamicCategories, invalidateDynamicCategoriesCache, uploadServiceImage, mergeCategories, DBCategory, DBService } from "../../lib/dynamicServices";
+import {
+  getHomepageFeatures, getTestimonials, getGalleryImages, getFaqs, uploadSiteImage,
+  DBFeature, DBTestimonial, DBGalleryImage, DBFaq,
+} from "../../lib/homepageContent";
+import { reviews as staticReviews } from "../../components/Reviews";
+import { slides as staticGallerySlides } from "../../components/Gallery";
+import { faqs as staticFaqs } from "../../components/Faq";
+
 import {
   BarChart, Bar, LineChart, Line, XAxis, YAxis, Tooltip,
   ResponsiveContainer, CartesianGrid, Legend,
@@ -17,11 +26,14 @@ import {
   Database, Activity, LogOut, Check, Trash2, CalendarClock,
   MessageCircle, Download, Shield, RefreshCw, Ban,
   Search, Trophy, BarChart2, DollarSign, AlertTriangle, CheckCircle,
-  Info, X, FileText, AlertCircle, Star, Eye, Menu
+  Info, X, FileText, AlertCircle, Star, Eye, Menu, Inbox, Phone as PhoneIcon,
+  Settings as SettingsIcon, Building2, Mail, Save,
+  Scissors, ImagePlus, Plus, Pencil, Layers, Loader2, Home, ChevronUp, ChevronDown, UserCheck, Tag as TagIcon, GripVertical,
+  Lock, Unlock,
 } from "lucide-react";
 
 // ── Types ──────────────────────────────────────────────
-type Tab = "dashboard" | "bookings" | "revenue" | "staff" | "contacts" | "backup" | "logs";
+type Tab = "dashboard" | "bookings" | "revenue" | "staff" | "contacts" | "inquiries" | "customers" | "services" | "homepage" | "settings" | "backup" | "logs";
 type ConfirmModal = { title: string; message: string; onConfirm: () => void; confirmLabel?: string; icon?: React.ReactNode; danger?: boolean } | null;
 type FilterType = "all" | "today" | "week" | "month";
 type TypeFilter = "all" | "salon" | "home";
@@ -44,15 +56,28 @@ async function sendEmailNotification(type: string, booking: Booking & { new_date
 }
 type Contact = { id: number; name: string; phone: string; message: string; };
 type StaffRow = { id: number; name: string; email?: string; role: string; active: boolean; };
+type Inquiry = {
+  id: number; full_name: string; phone: string; email?: string; gender?: string;
+  service?: string; preferred_contact: string; message?: string; status: string; created_at?: string;
+  inquiry_type?: string; budget?: string;
+};
 
 // ── Service price lookup ───────────────────────────────
-const SERVICE_PRICES: Record<string, number> = {};
-allCategories.forEach(cat => {
-  cat.services.forEach(s => {
-    SERVICE_PRICES[`${s.name} — ${cat.label}`] = s.price;
-    SERVICE_PRICES[s.name] = s.price; // backwards compat
+// Keyed to match the exact strings the booking flow stores in `service`:
+// "Name — Category", or "Group – Name — Category" for grouped services.
+// Built from the combined static + admin-created catalog (see catalogCategories state below).
+function buildServicePrices(cats: Category[]): Record<string, number> {
+  const prices: Record<string, number> = {};
+  cats.forEach(cat => {
+    cat.services.forEach(s => {
+      const price = s.discountPercent ? Math.round(s.price * (1 - s.discountPercent / 100)) : s.price;
+      const key = s.group ? `${s.group} – ${s.name} — ${cat.label}` : `${s.name} — ${cat.label}`;
+      prices[key] = price;
+      prices[s.name] = price; // backwards compat
+    });
   });
-});
+  return prices;
+}
 
 const STATUS_CONFIG: Record<string, { bg: string; text: string; dot: string }> = {
   Pending:   { bg: "rgba(245,199,90,0.14)",  text: "#f5c75a", dot: "#f5c75a" },
@@ -60,6 +85,97 @@ const STATUS_CONFIG: Record<string, { bg: string; text: string; dot: string }> =
   Completed: { bg: "rgba(79,208,128,0.14)",  text: "#4fd080", dot: "#4fd080" },
   Cancelled: { bg: "rgba(245,101,101,0.14)", text: "#f56565", dot: "#f56565" },
 };
+
+const INQUIRY_STATUS_CONFIG: Record<string, { bg: string; text: string; dot: string }> = {
+  "New":                  { bg: "rgba(90,180,245,0.14)",  text: "#5ab4f5", dot: "#5ab4f5" },
+  "Contacted":            { bg: "rgba(245,199,90,0.14)",  text: "#f5c75a", dot: "#f5c75a" },
+  "Follow-up Required":   { bg: "rgba(232,140,80,0.14)",  text: "#e88c50", dot: "#e88c50" },
+  "Converted to Booking": { bg: "rgba(79,208,128,0.14)",  text: "#4fd080", dot: "#4fd080" },
+  "Closed":               { bg: "rgba(150,150,150,0.14)", text: "#999999", dot: "#999999" },
+};
+const INQUIRY_STATUSES = Object.keys(INQUIRY_STATUS_CONFIG);
+
+const SETTING_GROUPS: { title: string; icon: any; keys: { key: string; label: string; placeholder: string; multiline?: boolean }[] }[] = [
+  {
+    title: "Business Information",
+    icon: Building2,
+    keys: [
+      { key: "salon_name",    label: "Salon Name",    placeholder: "Bella & Guy Salon" },
+      { key: "salon_tagline", label: "Tagline",        placeholder: "Premium Unisex Salon" },
+      { key: "salon_phone",   label: "Phone Number",   placeholder: "+91 96259 28495" },
+      { key: "salon_email",   label: "Email Address",  placeholder: "hello@bellaguysalon.com" },
+      { key: "salon_address", label: "Salon Address",  placeholder: "Wave City, Ghaziabad, UP 201003", multiline: true },
+      { key: "salon_hours",   label: "Working Hours",  placeholder: "Mon – Sun, 9:00 AM – 8:00 PM" },
+    ],
+  },
+  {
+    title: "Contact & Notifications",
+    icon: Mail,
+    keys: [
+      { key: "owner_whatsapp",   label: "Owner WhatsApp Number", placeholder: "+91 96259 28495" },
+      { key: "whatsapp_message", label: "Default WhatsApp Message", placeholder: "Hi! I'd like to book an appointment at Bella & Guy Salon.", multiline: true },
+      { key: "admin_email",      label: "Admin Notification Email", placeholder: "admin@bellaguysalon.com" },
+      { key: "review_link",      label: "Google Review Link", placeholder: "https://g.page/r/.../review" },
+    ],
+  },
+  {
+    title: "Advanced Settings",
+    icon: SettingsIcon,
+    keys: [
+      { key: "instagram_url",      label: "Instagram Profile URL", placeholder: "https://www.instagram.com/bellaandguy_" },
+      { key: "min_booking_value",  label: "Minimum Home Service Booking Value (₹)", placeholder: "1100" },
+      { key: "max_bookings_per_slot", label: "Max Bookings Per Time Slot", placeholder: "3 (how many customers can book the same 30-min slot before it's shown as full)" },
+    ],
+  },
+  {
+    title: "Hero Section (Homepage Top Banner)",
+    icon: Layers,
+    keys: [
+      { key: "hero_badge",           label: "Badge Text",              placeholder: "Wave City's Premium Home Beauty Service" },
+      { key: "hero_heading_1",       label: "Heading — Line 1",        placeholder: "Premium" },
+      { key: "hero_heading_2",       label: "Heading — Line 2",        placeholder: "Salon" },
+      { key: "hero_heading_gold",    label: "Heading — Highlight Line", placeholder: "At Your Doorstep" },
+      { key: "hero_tagline",         label: "Tagline",                 placeholder: "Professional beauty services, delivered to the comfort of your home.", multiline: true },
+      { key: "hero_cta_label",       label: "Main Button Text",        placeholder: "Book Home Service →" },
+      { key: "hero_cta_href",        label: "Main Button Link",        placeholder: "/book" },
+      { key: "hero_secondary_label", label: "Second Button Text",      placeholder: "📞 Call Now" },
+      { key: "hero_secondary_href",  label: "Second Button Link",      placeholder: "tel:+919625928495" },
+      { key: "hero_bg_image",        label: "Background Image URL",    placeholder: "/images/salon-front.jpg" },
+    ],
+  },
+  {
+    title: "Hero Stats Bar",
+    icon: Layers,
+    keys: [
+      { key: "stat1_value", label: "Stat 1 — Number",  placeholder: "5000" },
+      { key: "stat1_suffix", label: "Stat 1 — Suffix", placeholder: "+" },
+      { key: "stat1_label", label: "Stat 1 — Label",   placeholder: "Happy Clients" },
+      { key: "stat2_value", label: "Stat 2 — Number",  placeholder: "50" },
+      { key: "stat2_suffix", label: "Stat 2 — Suffix", placeholder: "+" },
+      { key: "stat2_label", label: "Stat 2 — Label",   placeholder: "Services" },
+      { key: "stat3_value", label: "Stat 3 — Number",  placeholder: "8" },
+      { key: "stat3_suffix", label: "Stat 3 — Suffix", placeholder: "+" },
+      { key: "stat3_label", label: "Stat 3 — Label",   placeholder: "Years Experience" },
+      { key: "stat4_value", label: "Stat 4 — Number",  placeholder: "4.9" },
+      { key: "stat4_suffix", label: "Stat 4 — Suffix", placeholder: "★" },
+      { key: "stat4_label", label: "Stat 4 — Label",   placeholder: "Google Rating" },
+    ],
+  },
+  {
+    title: "Trust Bullets (shown under the Hero buttons)",
+    icon: Layers,
+    keys: [
+      { key: "trust_1", label: "Bullet 1", placeholder: "Certified Professionals" },
+      { key: "trust_2", label: "Bullet 2", placeholder: "100% Original Products" },
+      { key: "trust_3", label: "Bullet 3", placeholder: "On-time Guarantee" },
+      { key: "trust_4", label: "Bullet 4", placeholder: "No Hidden Charges" },
+      { key: "trust_5", label: "Bullet 5", placeholder: "GST Included" },
+      { key: "trust_6", label: "Bullet 6", placeholder: "Trusted Brands Only" },
+      { key: "trust_7", label: "Bullet 7", placeholder: "No Convenience Charge" },
+      { key: "trust_8", label: "Bullet 8", placeholder: "Free Consultation" },
+    ],
+  },
+];
 
 // ── CSS ────────────────────────────────────────────────
 const CSS = `
@@ -116,6 +232,8 @@ const CSS = `
 
 /* SECTION CARD */
 .card { background: rgba(12,12,20,0.97); border: 1px solid rgba(255,255,255,0.05); border-radius: 16px; padding: 18px 20px; margin-bottom: 16px; }
+.cm-box-anim { animation: cmBoxIn 0.25s cubic-bezier(0.22,1,0.36,1); border-color: rgba(201,168,76,0.15); }
+@keyframes cmBoxIn { from { opacity: 0; transform: translateY(14px) scale(0.98); } to { opacity: 1; transform: translateY(0) scale(1); } }
 .card-title { font-size: 13px; font-weight: 600; color: #c9a84c; margin-bottom: 14px; display: flex; align-items: center; gap: 7px; }
 
 /* TABLE */
@@ -266,6 +384,7 @@ input:checked + .bk-slider::before { background: #c9a84c; transform: translateX(
 .ls { min-height: 100vh; background: #07070f; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 14px; font-family: 'Inter', sans-serif; }
 .lsp { width: 34px; height: 34px; border-radius: 50%; border: 3px solid rgba(201,168,76,0.18); border-top-color: #c9a84c; animation: sp 0.8s linear infinite; }
 @keyframes sp { to{transform:rotate(360deg);} }
+.spin { animation: sp 0.8s linear infinite; }
 
 /* SCROLLBAR */
 ::-webkit-scrollbar { width: 5px; height: 5px; }
@@ -353,18 +472,123 @@ input:checked + .bk-slider::before { background: #c9a84c; transform: translateX(
 }
 `;
 
+const smallInputStyle: React.CSSProperties = { flex: 1, background: "rgba(255,255,255,0.03)", border: "1px solid rgba(255,255,255,0.08)", borderRadius: 8, padding: "7px 10px", color: "#eee", fontSize: 12.5, fontFamily: "inherit" };
+const removeBtnStyle: React.CSSProperties = { background: "rgba(245,101,101,0.1)", border: "1px solid rgba(245,101,101,0.2)", borderRadius: 8, color: "#f56565", cursor: "pointer", padding: "0 10px", fontSize: 14 };
+
+function RepeatableList({ items, onChange, placeholder }: { items: string[]; onChange: (items: string[]) => void; placeholder: string }) {
+  return (
+    <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+      {items.map((item, i) => (
+        <div key={i} style={{ display: "flex", gap: 6 }}>
+          <input type="text" value={item} placeholder={placeholder}
+            onChange={e => { const next = [...items]; next[i] = e.target.value; onChange(next); }}
+            style={smallInputStyle} />
+          <button onClick={() => onChange(items.filter((_, j) => j !== i))} style={removeBtnStyle}>×</button>
+        </div>
+      ))}
+      <button onClick={() => onChange([...items, ""])} className="btn bv" style={{ alignSelf: "flex-start", display: "inline-flex", alignItems: "center", gap: 4 }}>
+        <Plus size={11} />Add
+      </button>
+    </div>
+  );
+}
+
+function RepeatableFaqs({ items, onChange }: { items: { q: string; a: string }[]; onChange: (items: { q: string; a: string }[]) => void }) {
+  return (
+    <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+      {items.map((item, i) => (
+        <div key={i} style={{ border: "1px solid rgba(255,255,255,0.08)", borderRadius: 8, padding: 8, display: "flex", flexDirection: "column", gap: 6 }}>
+          <div style={{ display: "flex", gap: 6 }}>
+            <input type="text" value={item.q} placeholder="Question"
+              onChange={e => { const next = [...items]; next[i] = { ...next[i], q: e.target.value }; onChange(next); }}
+              style={smallInputStyle} />
+            <button onClick={() => onChange(items.filter((_, j) => j !== i))} style={removeBtnStyle}>×</button>
+          </div>
+          <textarea value={item.a} placeholder="Answer" rows={2}
+            onChange={e => { const next = [...items]; next[i] = { ...next[i], a: e.target.value }; onChange(next); }}
+            style={{ ...smallInputStyle, resize: "vertical" as const }} />
+        </div>
+      ))}
+      <button onClick={() => onChange([...items, { q: "", a: "" }])} className="btn bv" style={{ alignSelf: "flex-start", display: "inline-flex", alignItems: "center", gap: 4 }}>
+        <Plus size={11} />Add FAQ
+      </button>
+    </div>
+  );
+}
+
+/** True when a Supabase error means "this table/column doesn't exist yet" — i.e. a migration hasn't been run. */
+function isMissingTableError(err: any): boolean {
+  return !!err && (err.code === "42P01" || err.code === "PGRST205" || /could not find the table|does not exist|schema cache/i.test(err.message ?? ""));
+}
+
+/** Shared shell for every add/edit modal in this file: dark overlay, click-outside-to-close, click-inside-does-nothing, capped width/height with scroll. */
+function Modal({ title, onClose, width = 420, children }: { title: React.ReactNode; onClose: () => void; width?: number; children: React.ReactNode }) {
+  return (
+    <div className="cm-overlay" onClick={onClose}>
+      <div className="card cm-box-anim" onClick={e => e.stopPropagation()} style={{ width, maxWidth: "90vw", maxHeight: "85vh", overflowY: "auto" }}>
+        <div className="card-title" style={{ justifyContent: "space-between" }}>
+          <span>{title}</span>
+          <button onClick={onClose} aria-label="Close" style={{ background: "rgba(255,255,255,0.05)", border: "1px solid rgba(255,255,255,0.08)", borderRadius: 8, width: 26, height: 26, display: "flex", alignItems: "center", justifyContent: "center", color: "#999", cursor: "pointer", flexShrink: 0 }}>
+            <X size={13} />
+          </button>
+        </div>
+        <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+          {children}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function HomeRowActions({ visible, onMoveUp, onMoveDown, onToggleVisible }: { visible: boolean; onMoveUp: () => void; onMoveDown: () => void; onToggleVisible: () => void }) {
+  return (
+    <div style={{ display: "flex", gap: 4, alignItems: "center", flexShrink: 0 }}>
+      <button className="btn bv" title="Move up" onClick={onMoveUp} style={{ padding: 5 }}><ChevronUp size={11} /></button>
+      <button className="btn bv" title="Move down" onClick={onMoveDown} style={{ padding: 5 }}><ChevronDown size={11} /></button>
+      <button className="btn bv" title={visible ? "Visible — click to hide" : "Hidden — click to show"} onClick={onToggleVisible} style={{ padding: 5, opacity: visible ? 1 : 0.4 }}><Eye size={11} /></button>
+    </div>
+  );
+}
+
 export default function AdminPage() {
   const router = useRouter();
+  const [catalogCategories, setCatalogCategories] = useState<Category[]>(staticCategories);
+  const refreshCatalog = () => {
+    invalidateDynamicCategoriesCache();
+    getDynamicCategories().then(dynamic => setCatalogCategories(mergeCategories(staticCategories, dynamic)));
+  };
+  useEffect(() => { refreshCatalog(); }, []);
+  const SERVICE_PRICES = useMemo(() => buildServicePrices(catalogCategories), [catalogCategories]);
   const [bookings, setBookings]   = useState<Booking[]>([]);
   const [contacts, setContacts]   = useState<Contact[]>([]);
   const [staffs, setStaffs]       = useState<StaffRow[]>([]);
+  const [inquiries, setInquiries] = useState<Inquiry[]>([]);
+  const [customerMeta, setCustomerMeta] = useState<Record<string, { notes: string; tags: string[]; blacklisted: boolean }>>({});
+  const [customerMetaMissing, setCustomerMetaMissing] = useState(false);
+  const [customerSearch, setCustomerSearch] = useState("");
+  const [activeCustomer, setActiveCustomer] = useState<string | null>(null);
+  const [customerNotesDraft, setCustomerNotesDraft] = useState("");
+  const [customerTagsDraft, setCustomerTagsDraft] = useState("");
+  const [customerSaving, setCustomerSaving] = useState(false);
+  const [customerError, setCustomerError] = useState("");
+  const [settings, setSettings]   = useState<Record<string, string>>({});
+  const [savingKey, setSavingKey] = useState<string | null>(null);
+  const [savedKey, setSavedKey]   = useState<string | null>(null);
+  const [settingsError, setSettingsError] = useState("");
+  const [heroImgUploading, setHeroImgUploading] = useState(false);
   const [activeTab, setActiveTab] = useState<Tab>("dashboard");
   const [search, setSearch]       = useState("");
   const [filter, setFilter]       = useState<FilterType>("all");
   const [typeFilter, setTypeFilter] = useState<TypeFilter>("all");
+  const [inquirySearch, setInquirySearch] = useState("");
+  const [inquiryStatusFilter, setInquiryStatusFilter] = useState<string>("all");
   const [selectedBooking, setSelectedBooking] = useState<Booking | null>(null);
   const [selectedDate, setSelectedDate]       = useState<Date>(new Date());
   const [notification, setNotification] = useState("");
+  function notify(msg: string, ms = 3000) {
+    setNotification(msg);
+    setTimeout(() => setNotification(""), ms);
+  }
   const [loading, setLoading]     = useState(true);
   const [currentStaff, setCurrentStaff] = useState<StaffRow | null>(null);
   const currentStaffRef = useRef<StaffRow | null>(null);
@@ -380,6 +604,417 @@ export default function AdminPage() {
 
   function showConfirm(title: string, message: string, onConfirm: () => void, opts?: { confirmLabel?: string; icon?: React.ReactNode; danger?: boolean }) {
     setConfirmModal({ title, message, onConfirm, ...opts });
+  }
+
+  // ── Services tab: admin-managed categories/services (Supabase-backed) ──
+  const [dbCategories, setDbCategories]     = useState<DBCategory[]>([]);
+  const [dbServices, setDbServices]         = useState<DBService[]>([]);
+  const [svcActiveCatId, setSvcActiveCatId] = useState<string | null>(null);
+  const [svcCatForm, setSvcCatForm]         = useState<Partial<DBCategory> | null>(null);
+  const [svcForm, setSvcForm]               = useState<Partial<DBService> | null>(null);
+  const [svcSaving, setSvcSaving]           = useState(false);
+  const [svcUploading, setSvcUploading]     = useState(false);
+  const [svcError, setSvcError]             = useState("");
+  const [svcSearch, setSvcSearch]           = useState("");
+  const [svcImporting, setSvcImporting]     = useState(false);
+  const [svcImportMsg, setSvcImportMsg]     = useState("");
+
+  const [svcTablesMissing, setSvcTablesMissing] = useState(false);
+  const [svcChecking, setSvcChecking]           = useState(false);
+
+  async function loadCatalogRaw() {
+    setSvcChecking(true);
+    const [{ data: cats, error: catErr }, { data: svcs, error: svcErr }] = await Promise.all([
+      supabase.from("service_categories").select("*").order("sort_order"),
+      supabase.from("services").select("*").order("sort_order"),
+    ]);
+    setSvcTablesMissing(isMissingTableError(catErr) || isMissingTableError(svcErr));
+    setDbCategories((cats as DBCategory[]) ?? []);
+    setDbServices((svcs as DBService[]) ?? []);
+    setSvcChecking(false);
+  }
+
+  useEffect(() => { loadCatalogRaw(); }, []);
+
+  async function saveCategory() {
+    if (!svcCatForm?.id || !svcCatForm?.label) { setSvcError("Category ID and label are required."); return; }
+    setSvcSaving(true); setSvcError("");
+    const isNew = !dbCategories.some(c => c.id === svcCatForm.id);
+    const { error } = isNew
+      ? await supabase.from("service_categories").insert({
+          id: svcCatForm.id, label: svcCatForm.label, description: svcCatForm.description ?? "",
+          icon: svcCatForm.icon ?? "✨", color: svcCatForm.color ?? "#f5f5f5",
+          gender: svcCatForm.gender ?? "both", home_service: svcCatForm.home_service ?? true,
+          images: svcCatForm.images ?? [],
+        })
+      : await supabase.from("service_categories").update({
+          label: svcCatForm.label, description: svcCatForm.description ?? "",
+          icon: svcCatForm.icon ?? "✨", color: svcCatForm.color ?? "#f5f5f5",
+          gender: svcCatForm.gender ?? "both", home_service: svcCatForm.home_service ?? true,
+          images: svcCatForm.images ?? [],
+        }).eq("id", svcCatForm.id);
+    setSvcSaving(false);
+    if (error) { setSvcError(error.message); return; }
+    await loadCatalogRaw();
+    refreshCatalog();
+    setSvcActiveCatId(svcCatForm.id!);
+    notify(`Saved "${svcCatForm.label}" ✓`);
+    setSvcCatForm(null);
+  }
+
+  function deleteCategory(cat: DBCategory) {
+    showConfirm(
+      "Delete Category",
+      `Delete "${cat.label}" and all its services? This can't be undone.`,
+      async () => {
+        setConfirmModal(null);
+        await supabase.from("service_categories").delete().eq("id", cat.id);
+        await loadCatalogRaw();
+        refreshCatalog();
+        if (svcActiveCatId === cat.id) setSvcActiveCatId(null);
+        notify(`Deleted "${cat.label}" ✓`);
+      },
+      { confirmLabel: "Delete", icon: <Trash2 size={22} />, danger: true }
+    );
+  }
+
+  async function saveService() {
+    if (!svcForm?.category_id || !svcForm?.name || svcForm.price == null) {
+      setSvcError("Category, name, and price are required.");
+      return;
+    }
+    setSvcSaving(true); setSvcError("");
+    const payload = {
+      category_id: svcForm.category_id, name: svcForm.name, price: Math.round(Number(svcForm.price)),
+      duration: svcForm.duration || null, group_name: svcForm.group_name || null,
+      description: svcForm.description || null, popular: svcForm.popular ?? false,
+      images: svcForm.images ?? [],
+      trending: svcForm.trending ?? false,
+      discount_percent: svcForm.discount_percent || null,
+      long_description: svcForm.long_description || null,
+      included_steps: svcForm.included_steps ?? [],
+      benefits: svcForm.benefits ?? [],
+      before_images: svcForm.before_images ?? [],
+      after_images: svcForm.after_images ?? [],
+      faqs: svcForm.faqs ?? [],
+      section: svcForm.section || null,
+    };
+    const { error } = svcForm.id
+      ? await supabase.from("services").update(payload).eq("id", svcForm.id)
+      : await supabase.from("services").insert(payload);
+    setSvcSaving(false);
+    if (error) { setSvcError(error.message); return; }
+    await loadCatalogRaw();
+    refreshCatalog();
+    // Jump to whichever category the service now belongs to, so an edit that
+    // reassigns the category doesn't look like it "disappeared" — the admin
+    // was looking at the old category and the saved item moved out of view.
+    setSvcActiveCatId(svcForm.category_id!);
+    notify(`Saved "${svcForm.name}" ✓`);
+    setSvcForm(null);
+  }
+
+  function deleteService(svc: DBService) {
+    showConfirm(
+      "Delete Service",
+      `Delete "${svc.name}"? This can't be undone.`,
+      async () => {
+        setConfirmModal(null);
+        await supabase.from("services").delete().eq("id", svc.id);
+        await loadCatalogRaw();
+        refreshCatalog();
+        notify(`Deleted "${svc.name}" ✓`);
+      },
+      { confirmLabel: "Delete", icon: <Trash2 size={22} />, danger: true }
+    );
+  }
+
+  // Drag-and-drop reorder: dropping service `draggedId` onto `targetId` moves
+  // it to that position (not just a single-step swap), then re-numbers every
+  // row's sort_order in the new sequence so the order sticks.
+  const [draggedServiceId, setDraggedServiceId] = useState<number | null>(null);
+  const [dragOverServiceId, setDragOverServiceId] = useState<number | null>(null);
+  // Lock switch for the drag-and-drop above — locked means no accidental
+  // reorders while browsing/editing; persisted per device.
+  const [reorderLocked, setReorderLocked] = useState(() => { try { return localStorage.getItem("bg_reorder_lock") === "1"; } catch { return false; } });
+  function toggleReorderLock() {
+    setReorderLocked(locked => {
+      const next = !locked;
+      try { localStorage.setItem("bg_reorder_lock", next ? "1" : "0"); } catch {}
+      notify(next ? "Order locked 🔒 — drag-and-drop disabled" : "Order unlocked — drag to rearrange");
+      return next;
+    });
+  }
+  async function reorderByDrag<T extends { id: string | number; sort_order: number }>(
+    table: string, rows: T[], draggedId: T["id"], targetId: T["id"]
+  ) {
+    if (reorderLocked || draggedId === targetId) return;
+    const fromIdx = rows.findIndex(r => r.id === draggedId);
+    const toIdx = rows.findIndex(r => r.id === targetId);
+    if (fromIdx < 0 || toIdx < 0) return;
+    const reordered = [...rows];
+    const [moved] = reordered.splice(fromIdx, 1);
+    reordered.splice(toIdx, 0, moved);
+    const results = await Promise.all(
+      reordered.map((r, i) => r.sort_order === i ? null : supabase.from(table).update({ sort_order: i }).eq("id", r.id))
+    );
+    const failed = results.find(r => r?.error);
+    if (failed?.error) { setSvcError(failed.error.message); return; }
+    await loadCatalogRaw();
+    refreshCatalog();
+  }
+  const reorderServiceByDrag = (rows: DBService[], draggedId: number, targetId: number) => reorderByDrag("services", rows, draggedId, targetId);
+  const [draggedCategoryId, setDraggedCategoryId] = useState<string | null>(null);
+  const [dragOverCategoryId, setDragOverCategoryId] = useState<string | null>(null);
+  const reorderCategoryByDrag = (draggedId: string, targetId: string) => reorderByDrag("service_categories", dbCategories, draggedId, targetId);
+
+  async function handleSvcImageUpload(files: FileList | null, target: "category" | "service" | "before" | "after") {
+    if (!files || !files.length) return;
+    setSvcUploading(true); setSvcError("");
+    try {
+      const urls = await Promise.all(Array.from(files).map(f => uploadServiceImage(f)));
+      if (target === "category") {
+        setSvcCatForm(f => f ? { ...f, images: [...(f.images ?? []), ...urls] } : f);
+      } else if (target === "before") {
+        setSvcForm(f => f ? { ...f, before_images: [...(f.before_images ?? []), ...urls] } : f);
+      } else if (target === "after") {
+        setSvcForm(f => f ? { ...f, after_images: [...(f.after_images ?? []), ...urls] } : f);
+      } else {
+        setSvcForm(f => f ? { ...f, images: [...(f.images ?? []), ...urls] } : f);
+      }
+    } catch (err: any) {
+      setSvcError(err.message || "Image upload failed.");
+    } finally {
+      setSvcUploading(false);
+    }
+  }
+
+  // One-time import: copies the original hardcoded catalog (lib/servicesData.ts)
+  // into the database so every service — old and new — is manageable from this
+  // one screen. Skips categories already imported, so it's safe to click again
+  // (e.g. after adding a brand-new static category in code later).
+  async function importStaticCatalog() {
+    const alreadyImported = new Set(dbCategories.map(c => c.id));
+    const toImport = staticCategories.filter(c => !alreadyImported.has(c.id));
+    if (toImport.length === 0) { setSvcImportMsg("Everything is already imported."); return; }
+
+    setSvcImporting(true); setSvcImportMsg(""); setSvcError("");
+    let catCount = 0, svcCount = 0;
+    for (const cat of toImport) {
+      const { error: catErr } = await supabase.from("service_categories").insert({
+        id: cat.id, label: cat.label, description: cat.desc, icon: cat.icon, color: cat.color,
+        gender: cat.gender, home_service: cat.homeService, images: cat.imgs ?? [],
+      });
+      if (catErr) { setSvcError(`Failed on "${cat.label}": ${catErr.message}`); break; }
+      catCount++;
+      const rows = cat.services.map(s => ({
+        category_id: cat.id, name: s.name, price: s.price, duration: s.duration ?? null,
+        group_name: s.group ?? null, description: s.desc ?? null, popular: s.popular ?? false,
+        images: s.gallery ?? [], section: s.section ?? null, trending: s.trending ?? false,
+        discount_percent: s.discountPercent ?? null, long_description: s.longDesc ?? null,
+        included_steps: s.includedSteps ?? [], benefits: s.benefits ?? [],
+        before_images: s.beforeImages ?? [], after_images: s.afterImages ?? [],
+        faqs: s.faqs ?? [],
+      }));
+      if (rows.length) {
+        const { error: svcErr } = await supabase.from("services").insert(rows);
+        if (svcErr) { setSvcError(`Failed on services for "${cat.label}": ${svcErr.message}`); break; }
+        svcCount += rows.length;
+      }
+    }
+    await loadCatalogRaw();
+    refreshCatalog();
+    setSvcImporting(false);
+    setSvcImportMsg(`Imported ${catCount} categor${catCount === 1 ? "y" : "ies"} and ${svcCount} services.`);
+  }
+
+  // ── Homepage tab: Why Choose Us / Testimonials / Gallery / FAQ (Supabase-backed) ──
+  type HomeTable = "homepage_features" | "testimonials" | "gallery_images" | "faqs";
+  const [dbFeatures, setDbFeatures]         = useState<DBFeature[]>([]);
+  const [dbTestimonials, setDbTestimonials] = useState<DBTestimonial[]>([]);
+  const [dbGalleryImages, setDbGalleryImages] = useState<DBGalleryImage[]>([]);
+  const [dbFaqs, setDbFaqs]                 = useState<DBFaq[]>([]);
+  const [homeSection, setHomeSection]       = useState<"features" | "testimonials" | "gallery" | "faqs">("features");
+  const [homeTablesMissing, setHomeTablesMissing] = useState(false);
+  const [homeChecking, setHomeChecking]     = useState(false);
+  const [homeError, setHomeError]           = useState("");
+  const [homeSaving, setHomeSaving]         = useState(false);
+  const [homeUploading, setHomeUploading]   = useState(false);
+  const [homeImporting, setHomeImporting]   = useState(false);
+  const [homeImportMsg, setHomeImportMsg]   = useState("");
+  const [featureForm, setFeatureForm]         = useState<Partial<DBFeature> | null>(null);
+  const [testimonialForm, setTestimonialForm] = useState<Partial<DBTestimonial> | null>(null);
+  const [galleryForm, setGalleryForm]         = useState<Partial<DBGalleryImage> | null>(null);
+  const [faqForm, setFaqForm]                 = useState<Partial<DBFaq> | null>(null);
+
+  async function loadHomepageRaw() {
+    setHomeChecking(true);
+    const [
+      { data: feats, error: featErr }, { data: testis, error: testiErr },
+      { data: imgs, error: imgErr }, { data: faqRows, error: faqErr },
+    ] = await Promise.all([
+      supabase.from("homepage_features").select("*").order("sort_order"),
+      supabase.from("testimonials").select("*").order("sort_order"),
+      supabase.from("gallery_images").select("*").order("sort_order"),
+      supabase.from("faqs").select("*").order("sort_order"),
+    ]);
+    setHomeTablesMissing(isMissingTableError(featErr) || isMissingTableError(testiErr) || isMissingTableError(imgErr) || isMissingTableError(faqErr));
+    setDbFeatures((feats as DBFeature[]) ?? []);
+    setDbTestimonials((testis as DBTestimonial[]) ?? []);
+    setDbGalleryImages((imgs as DBGalleryImage[]) ?? []);
+    setDbFaqs((faqRows as DBFaq[]) ?? []);
+    setHomeChecking(false);
+  }
+  useEffect(() => { loadHomepageRaw(); }, []);
+
+  async function saveHomeRow(table: HomeTable, row: Record<string, any>, label: string) {
+    setHomeSaving(true); setHomeError("");
+    const { id, ...payload } = row;
+    const { error } = id
+      ? await supabase.from(table).update(payload).eq("id", id)
+      : await supabase.from(table).insert(payload);
+    setHomeSaving(false);
+    if (error) { setHomeError(error.message); return false; }
+    await loadHomepageRaw();
+    notify(`Saved "${label}" ✓`);
+    return true;
+  }
+
+  function deleteHomeRow(table: HomeTable, id: number, label: string) {
+    showConfirm(
+      "Delete",
+      `Delete "${label}"? This can't be undone.`,
+      async () => {
+        setConfirmModal(null);
+        await supabase.from(table).delete().eq("id", id);
+        await loadHomepageRaw();
+        notify(`Deleted "${label}" ✓`);
+      },
+      { confirmLabel: "Delete", icon: <Trash2 size={22} />, danger: true }
+    );
+  }
+
+  async function toggleHomeVisible(table: HomeTable, id: number, visible: boolean) {
+    const { error } = await supabase.from(table).update({ visible }).eq("id", id);
+    if (error) { setHomeError(error.message); return; }
+    await loadHomepageRaw();
+  }
+
+  async function moveHomeRow(table: HomeTable, rows: { id: number }[], id: number, dir: -1 | 1) {
+    const idx = rows.findIndex(r => r.id === id);
+    const swapIdx = idx + dir;
+    if (idx < 0 || swapIdx < 0 || swapIdx >= rows.length) return;
+    const results = await Promise.all([
+      supabase.from(table).update({ sort_order: swapIdx }).eq("id", rows[idx].id),
+      supabase.from(table).update({ sort_order: idx }).eq("id", rows[swapIdx].id),
+    ]);
+    const failed = results.find(r => r.error);
+    if (failed?.error) { setHomeError(failed.error.message); return; }
+    await loadHomepageRaw();
+  }
+
+  async function handleGalleryImageUpload(files: FileList | null) {
+    if (!files || !files.length) return;
+    // Selecting more than one photo here adds them all as separate gallery
+    // entries directly (a single row only holds one photo) and closes this
+    // form — matches the dedicated "Upload Multiple" button's behavior.
+    if (files.length > 1) {
+      await handleBulkGalleryUpload(files);
+      setGalleryForm(null);
+      return;
+    }
+    setHomeUploading(true); setHomeError("");
+    try {
+      const url = await uploadSiteImage(files[0]);
+      setGalleryForm(f => f ? { ...f, src: url } : f);
+    } catch (err: any) {
+      setHomeError(err.message || "Image upload failed.");
+    } finally {
+      setHomeUploading(false);
+    }
+  }
+
+  async function handleBulkGalleryUpload(files: FileList | null) {
+    if (!files || !files.length) return;
+    setHomeUploading(true); setHomeError("");
+    try {
+      const urls = await Promise.all(Array.from(files).map(f => uploadSiteImage(f)));
+      const startOrder = dbGalleryImages.length;
+      const { error } = await supabase.from("gallery_images").insert(
+        urls.map((src, i) => ({ src, visible: true, sort_order: startOrder + i }))
+      );
+      if (error) throw error;
+      await loadHomepageRaw();
+      notify(`Added ${urls.length} photo${urls.length === 1 ? "" : "s"} ✓`);
+    } catch (err: any) {
+      setHomeError(err.message || "Image upload failed.");
+    } finally {
+      setHomeUploading(false);
+    }
+  }
+
+  async function handleTestimonialPhotoUpload(files: FileList | null) {
+    if (!files || !files.length) return;
+    setHomeUploading(true); setHomeError("");
+    try {
+      const url = await uploadSiteImage(files[0]);
+      setTestimonialForm(f => f ? { ...f, photo: url } : f);
+    } catch (err: any) {
+      setHomeError(err.message || "Image upload failed.");
+    } finally {
+      setHomeUploading(false);
+    }
+  }
+
+  // One-time import: copies the content currently hardcoded on the live homepage
+  // (Why Choose Us cards, testimonials, gallery photos, FAQs) into the database
+  // so it shows up here and can be edited — same idea as the Services tab's
+  // "Bring in my existing services". Only imports sections that are still empty,
+  // so it's safe to click again later.
+  async function importHomepageDefaults() {
+    setHomeImporting(true); setHomeImportMsg(""); setHomeError("");
+    // Why Choose Us cards are deliberately NOT auto-imported: the live site's
+    // 6 cards use hand-drawn gold line-icon SVGs that can't be represented as
+    // emoji text without looking noticeably worse. They stay hardcoded/SVG
+    // unless you build brand-new cards here yourself ("Add Card").
+    let n = { testimonials: 0, gallery: 0, faqs: 0 };
+    try {
+      if (dbTestimonials.length === 0) {
+        const { error } = await supabase.from("testimonials").insert(
+          staticReviews.map((r, i) => ({
+            name: r.name, location: r.date, service: r.service, review: r.text,
+            rating: r.rating, initials: r.initials, sort_order: i,
+          }))
+        );
+        if (error) throw new Error(`Testimonials: ${error.message}`);
+        n.testimonials = staticReviews.length;
+      }
+      if (dbGalleryImages.length === 0) {
+        const { error } = await supabase.from("gallery_images").insert(
+          staticGallerySlides.map((s, i) => ({ src: s.fallback, label: s.label, sub: s.sub, sort_order: i }))
+        );
+        if (error) throw new Error(`Gallery: ${error.message}`);
+        n.gallery = staticGallerySlides.length;
+      }
+      if (dbFaqs.length === 0) {
+        const { error } = await supabase.from("faqs").insert(
+          staticFaqs.map((f, i) => ({ question: f.q, answer: f.a, sort_order: i }))
+        );
+        if (error) throw new Error(`FAQs: ${error.message}`);
+        n.faqs = staticFaqs.length;
+      }
+      await loadHomepageRaw();
+      const parts = [
+        n.testimonials && `${n.testimonials} testimonial${n.testimonials === 1 ? "" : "s"}`,
+        n.gallery && `${n.gallery} gallery photo${n.gallery === 1 ? "" : "s"}`,
+        n.faqs && `${n.faqs} FAQ${n.faqs === 1 ? "" : "s"}`,
+      ].filter(Boolean);
+      setHomeImportMsg(parts.length ? `Imported: ${parts.join(", ")}.` : "Everything is already imported.");
+    } catch (err: any) {
+      setHomeError(err.message || "Import failed.");
+    } finally {
+      setHomeImporting(false);
+    }
   }
 
   async function logActivity(action: string, details: string, entityType?: string, entityId?: number) {
@@ -430,14 +1065,29 @@ export default function AdminPage() {
         if (payload.eventType === "INSERT") {
           const n = payload.new as Booking;
           playNotificationSound();
-          setNotification(`New booking: ${n.full_name} — ${n.service}`);
+          notify(`New booking: ${n.full_name} — ${n.service}`, 6000);
           if (Notification.permission === "granted")
             new Notification("New Booking", { body: `${n.full_name} booked ${n.service}` });
-          setTimeout(() => setNotification(""), 6000);
         }
       }).subscribe();
     // Polling fallback every 30s in case realtime replication isn't enabled on the table
     const poll = setInterval(() => fetchBookings(currentStaffRef.current), 30000);
+    return () => { supabase.removeChannel(ch); clearInterval(poll); };
+  }, []);
+
+  useEffect(() => {
+    const ch = supabase.channel("inquiries")
+      .on("postgres_changes", { event: "*", schema: "public", table: "inquiries" }, payload => {
+        fetchInquiries();
+        if (payload.eventType === "INSERT") {
+          const n = payload.new as Inquiry;
+          playNotificationSound();
+          notify(`New inquiry: ${n.full_name}${n.service ? ` — ${n.service}` : ""}`, 6000);
+          if (Notification.permission === "granted")
+            new Notification("New Inquiry", { body: `${n.full_name} sent an inquiry` });
+        }
+      }).subscribe();
+    const poll = setInterval(fetchInquiries, 30000);
     return () => { supabase.removeChannel(ch); clearInterval(poll); };
   }, []);
 
@@ -451,7 +1101,7 @@ export default function AdminPage() {
     if (!staff) { await supabase.auth.signOut(); router.push("/login"); return; }
     setCurrentStaff(staff);
     currentStaffRef.current = staff;
-    await Promise.all([fetchBookings(staff), fetchContacts(), fetchStaff()]);
+    await Promise.all([fetchBookings(staff), fetchContacts(), fetchStaff(), fetchInquiries(), fetchSettings(), fetchCustomerMeta()]);
     // Try fetch security events (silently skip if table doesn't exist)
     try {
       const since = new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString();
@@ -493,6 +1143,120 @@ export default function AdminPage() {
   async function fetchStaff() {
     const { data } = await supabase.from("staff").select("*").eq("active", true).neq("role", "admin");
     if (data) setStaffs(data);
+  }
+
+  async function fetchInquiries() {
+    // Wrapped defensively: the `inquiries` table is created via supabase/inquiries.sql,
+    // which may not have been run yet — don't let a missing table break the whole panel.
+    try {
+      const { data } = await supabase.from("inquiries").select("*").order("id", { ascending: false });
+      if (data) setInquiries(data);
+    } catch {}
+  }
+
+  async function fetchCustomerMeta() {
+    try {
+      const { data, error } = await supabase.from("customers").select("*");
+      setCustomerMetaMissing(isMissingTableError(error));
+      if (data) {
+        const map: Record<string, { notes: string; tags: string[]; blacklisted: boolean }> = {};
+        data.forEach((c: any) => { map[c.phone] = { notes: c.notes ?? "", tags: c.tags ?? [], blacklisted: c.blacklisted ?? false }; });
+        setCustomerMeta(map);
+      }
+    } catch {}
+  }
+
+  async function saveCustomerMeta(phone: string, updates: Partial<{ notes: string; tags: string[]; blacklisted: boolean }>) {
+    setCustomerSaving(true); setCustomerError("");
+    const current = customerMeta[phone] ?? { notes: "", tags: [], blacklisted: false };
+    const next = { ...current, ...updates };
+    const { error } = await supabase.from("customers").upsert({ phone, ...next, updated_at: new Date().toISOString() });
+    setCustomerSaving(false);
+    if (error) { setCustomerError(error.message); return; }
+    setCustomerMeta(m => ({ ...m, [phone]: next }));
+    notify("Saved ✓", 2500);
+  }
+
+  async function fetchSettings() {
+    try {
+      const { data, error } = await supabase.from("settings").select("*");
+      if (error) {
+        setSettingsError(
+          isMissingTableError(error)
+            ? 'Settings table not found. Run supabase/settings.sql in the Supabase SQL Editor, then reload this page.'
+            : error.message
+        );
+        return;
+      }
+      setSettingsError("");
+      if (data) {
+        const map: Record<string, string> = {};
+        (data as { key: string; value: string }[]).forEach(s => { map[s.key] = s.value; });
+        setSettings(map);
+      }
+    } catch (err: any) {
+      setSettingsError(err?.message || "Failed to load settings.");
+    }
+  }
+
+  async function saveSetting(key: string) {
+    setSavingKey(key);
+    setSettingsError("");
+    try {
+      const { error } = await supabase.from("settings").upsert({ key, value: settings[key] ?? "", updated_at: new Date().toISOString() });
+      if (error) {
+        setSettingsError(
+          isMissingTableError(error)
+            ? 'Settings table not found. Run supabase/settings.sql in the Supabase SQL Editor, then try again.'
+            : `Could not save "${key}": ${error.message}`
+        );
+        return;
+      }
+      logActivity("SETTING_UPDATED", `Setting "${key}" updated`, "setting");
+      setSavedKey(key);
+      setTimeout(() => setSavedKey(null), 3000);
+    } catch (err: any) {
+      setSettingsError(err?.message || `Could not save "${key}".`);
+    } finally {
+      setSavingKey(null);
+    }
+  }
+
+  function getHeroImages(): string[] {
+    try {
+      const parsed = JSON.parse(settings.hero_bg_images || "[]");
+      if (Array.isArray(parsed) && parsed.length) return parsed;
+    } catch {}
+    return settings.hero_bg_image ? [settings.hero_bg_image] : [];
+  }
+
+  async function saveHeroImages(images: string[]) {
+    setSettings(p => ({ ...p, hero_bg_images: JSON.stringify(images) }));
+    const { error } = await supabase.from("settings").upsert({ key: "hero_bg_images", value: JSON.stringify(images), updated_at: new Date().toISOString() });
+    if (error) throw error;
+    setSavedKey("hero_bg_image");
+    setTimeout(() => setSavedKey(null), 3000);
+  }
+
+  async function handleHeroImageUpload(files: FileList | null) {
+    if (!files || !files.length) return;
+    setHeroImgUploading(true); setSettingsError("");
+    try {
+      const urls = await Promise.all(Array.from(files).map(f => uploadSiteImage(f)));
+      await saveHeroImages([...getHeroImages(), ...urls]);
+    } catch (err: any) {
+      setSettingsError(err?.message || "Image upload failed.");
+    } finally {
+      setHeroImgUploading(false);
+    }
+  }
+
+  async function removeHeroImage(url: string) {
+    try {
+      await saveHeroImages(getHeroImages().filter(u => u !== url));
+    } catch (err: any) {
+      setSettingsError(err?.message || "Could not remove image.");
+    }
   }
 
   async function updateStatus(id: number, status: string) {
@@ -553,16 +1317,79 @@ export default function AdminPage() {
     );
   }
 
+  async function updateInquiryStatus(id: number, status: string) {
+    await supabase.from("inquiries").update({ status }).eq("id", id);
+    const inq = inquiries.find(i => i.id === id);
+    if (inq) logActivity("INQUIRY_STATUS_CHANGED", `${inq.full_name}'s inquiry changed to ${status}`, "inquiry", id);
+    fetchInquiries();
+  }
+
+  function deleteInquiry(id: number) {
+    const inq = inquiries.find(i => i.id === id);
+    showConfirm(
+      "Delete Inquiry",
+      "This inquiry will be permanently deleted and cannot be recovered.",
+      async () => {
+        setConfirmModal(null);
+        await supabase.from("inquiries").delete().eq("id", id);
+        if (inq) logActivity("INQUIRY_DELETED", `Inquiry from ${inq.full_name} deleted`, "inquiry", id);
+        fetchInquiries();
+      },
+      { confirmLabel: "Delete", icon: <Trash2 size={22}/>, danger: true }
+    );
+  }
+
   // ── Computed values ───────────────────────────────
   const today       = new Date().toISOString().split("T")[0];
   const thisMonth   = new Date().toISOString().slice(0, 7);
   const tomorrow    = (() => { const d = new Date(); d.setDate(d.getDate() + 1); return d.toISOString().split("T")[0]; })();
 
-  const price = (b: Booking) => SERVICE_PRICES[b.service] || 0;
+  const price = (b: Booking) =>
+    b.service.split(", ").reduce((sum, part) => sum + (SERVICE_PRICES[part.trim()] || 0), 0);
 
-  const totalRevenue  = useMemo(() => bookings.filter(b => b.status !== "Cancelled").reduce((s, b) => s + price(b), 0), [bookings]);
-  const monthRevenue  = useMemo(() => bookings.filter(b => b.status !== "Cancelled" && b.booking_date?.slice(0,7) === thisMonth).reduce((s,b) => s + price(b), 0), [bookings]);
-  const todayRevenue  = useMemo(() => bookings.filter(b => b.status !== "Cancelled" && b.booking_date === today).reduce((s,b) => s + price(b), 0), [bookings]);
+  // ── Customer CRM: derived purely from bookings + inquiries, grouped by phone ──
+  type CustomerProfile = {
+    phone: string; name: string; email?: string;
+    bookings: Booking[]; inquiries: Inquiry[];
+    totalBookings: number; lifetimeValue: number; lastVisit: string;
+    favouriteService: string; notes: string; tags: string[]; blacklisted: boolean;
+  };
+  const customerProfiles = useMemo<CustomerProfile[]>(() => {
+    const byPhone: Record<string, { bookings: Booking[]; inquiries: Inquiry[] }> = {};
+    bookings.forEach(b => { (byPhone[b.phone] ??= { bookings: [], inquiries: [] }).bookings.push(b); });
+    inquiries.forEach(i => { (byPhone[i.phone] ??= { bookings: [], inquiries: [] }).inquiries.push(i); });
+
+    return Object.entries(byPhone).map(([phone, g]) => {
+      const sortedBookings = [...g.bookings].sort((a, b) => (b.booking_date || "").localeCompare(a.booking_date || ""));
+      const latest = sortedBookings[0] ?? g.inquiries[0];
+      const serviceCounts: Record<string, number> = {};
+      g.bookings.forEach(b => { b.service.split(", ").forEach(s => { serviceCounts[s.trim()] = (serviceCounts[s.trim()] ?? 0) + 1; }); });
+      const favouriteService = Object.entries(serviceCounts).sort((a, b) => b[1] - a[1])[0]?.[0] ?? "—";
+      const meta = customerMeta[phone] ?? { notes: "", tags: [], blacklisted: false };
+      return {
+        phone,
+        name: latest?.full_name ?? phone,
+        email: sortedBookings.find(b => b.email)?.email ?? g.inquiries.find(i => i.email)?.email,
+        bookings: sortedBookings,
+        inquiries: g.inquiries,
+        totalBookings: g.bookings.length,
+        lifetimeValue: g.bookings.filter(b => b.status !== "Cancelled").reduce((s, b) => s + price(b), 0),
+        lastVisit: sortedBookings[0]?.booking_date ?? "",
+        favouriteService,
+        ...meta,
+      };
+    }).sort((a, b) => b.lifetimeValue - a.lifetimeValue);
+  }, [bookings, inquiries, customerMeta, SERVICE_PRICES]);
+
+  const filteredCustomers = useMemo(() => {
+    const q = customerSearch.trim().toLowerCase();
+    if (!q) return customerProfiles;
+    return customerProfiles.filter(c => c.name.toLowerCase().includes(q) || c.phone.includes(q) || (c.email ?? "").toLowerCase().includes(q));
+  }, [customerProfiles, customerSearch]);
+
+  const totalRevenue  = useMemo(() => bookings.filter(b => b.status !== "Cancelled").reduce((s, b) => s + price(b), 0), [bookings, SERVICE_PRICES]);
+  const monthRevenue  = useMemo(() => bookings.filter(b => b.status !== "Cancelled" && b.booking_date?.slice(0,7) === thisMonth).reduce((s,b) => s + price(b), 0), [bookings, SERVICE_PRICES]);
+  const todayRevenue  = useMemo(() => bookings.filter(b => b.status !== "Cancelled" && b.booking_date === today).reduce((s,b) => s + price(b), 0), [bookings, SERVICE_PRICES]);
   const completedCnt  = bookings.filter(b => b.status === "Completed").length;
   const avgBooking    = completedCnt ? Math.round(totalRevenue / completedCnt) : 0;
 
@@ -576,7 +1403,7 @@ export default function AdminPage() {
       const cnt = bookings.filter(b => b.booking_date?.slice(0,7) === ym).length;
       return { name: label, Revenue: rev, Bookings: cnt };
     });
-  }, [bookings]);
+  }, [bookings, SERVICE_PRICES]);
 
   // Service revenue breakdown
   const serviceRevenue = useMemo(() => {
@@ -585,7 +1412,7 @@ export default function AdminPage() {
       map[b.service] = (map[b.service] || 0) + price(b);
     });
     return Object.entries(map).sort((a,b) => b[1]-a[1]).slice(0, 10);
-  }, [bookings]);
+  }, [bookings, SERVICE_PRICES]);
 
   const maxServiceRev = serviceRevenue[0]?.[1] || 1;
 
@@ -596,7 +1423,7 @@ export default function AdminPage() {
     const done = sb.filter(b => b.status === "Completed").length;
     const top = Object.entries(sb.reduce((a,b) => { a[b.service]=(a[b.service]||0)+1; return a; }, {} as Record<string,number>)).sort((a,b)=>b[1]-a[1])[0];
     return { ...s, total: sb.length, done, revenue: rev, avg: sb.length ? Math.round(rev/sb.length) : 0, topService: top?.[0] || "—" };
-  }), [staffs, bookings]);
+  }), [staffs, bookings, SERVICE_PRICES]);
 
   // Filter bookings
   const filteredBookings = useMemo(() => bookings.filter(b => {
@@ -618,6 +1445,13 @@ export default function AdminPage() {
     if (filter === "month") return m && b.booking_date?.slice(0,7) === thisMonth;
     return m;
   }), [bookings, search, filter, typeFilter]);
+
+  const filteredInquiries = useMemo(() => inquiries.filter(i => {
+    const q = inquirySearch.toLowerCase().trim();
+    const m = !q || [i.full_name, i.phone, i.service, i.message, i.budget].some(f => (f ?? "").toLowerCase().includes(q));
+    const s = inquiryStatusFilter === "all" || i.status === inquiryStatusFilter;
+    return m && s;
+  }), [inquiries, inquirySearch, inquiryStatusFilter]);
 
   // Customer history for modal
   const custHistory = selectedBooking ? bookings.filter(b => b.phone === selectedBooking.phone) : [];
@@ -900,6 +1734,57 @@ export default function AdminPage() {
     document.body.removeChild(a); URL.revokeObjectURL(url);
   }
 
+  function csvExportInquiries() {
+    const h = ["ID", "Name", "Phone", "Email", "Type", "Gender", "Service", "Budget", "Preferred Contact", "Message", "Status", "Date"];
+    const rows = filteredInquiries.map(i => [
+      i.id, i.full_name, i.phone, i.email || "", i.inquiry_type === "franchise" ? "Franchise" : "Service", i.gender || "",
+      i.service || "", i.budget || "", i.preferred_contact, i.message || "", i.status,
+      i.created_at ? new Date(i.created_at).toLocaleString("en-IN") : "",
+    ]);
+    const BOM = "﻿";
+    const csv = BOM + [h, ...rows].map(r => r.map(c => `"${String(c).replace(/"/g, '""')}"`).join(",")).join("\r\n");
+    const blob = new Blob([csv], { type: "application/octet-stream" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url; a.download = `bella-guy-inquiries-${today}.csv`;
+    document.body.appendChild(a); a.click();
+    document.body.removeChild(a); URL.revokeObjectURL(url);
+  }
+
+  function pdfInquiries() {
+    const doc = new jsPDF();
+    const W = doc.internal.pageSize.getWidth();
+    const dateStr = new Date().toLocaleDateString("en-IN", { day:"2-digit", month:"long", year:"numeric" });
+
+    pdfHeader(doc, "Inquiries Report", dateStr);
+
+    const converted = filteredInquiries.filter(i => i.status === "Converted to Booking").length;
+    const newCount  = filteredInquiries.filter(i => i.status === "New").length;
+    const bw = (W - 28) / 3;
+    pdfStatBox(doc, 14,        48, bw - 3, "Total Inquiries", String(filteredInquiries.length));
+    pdfStatBox(doc, 14 + bw,   48, bw - 3, "New",             String(newCount));
+    pdfStatBox(doc, 14 + bw*2, 48, bw - 3, "Converted",       String(converted), true);
+
+    autoTable(doc, {
+      startY: 70,
+      head: [["#", "Name", "Phone", "Service / Budget", "Preferred", "Status", "Date"]],
+      body: filteredInquiries.map((i, idx) => [
+        idx + 1, i.full_name, i.phone,
+        i.inquiry_type === "franchise" ? `Franchise · ${i.budget || "—"}` : (i.service || "—"),
+        i.preferred_contact, i.status,
+        i.created_at ? new Date(i.created_at).toLocaleDateString("en-IN") : "—",
+      ]),
+      headStyles: { fillColor: [30, 25, 10], textColor: [201, 168, 76], fontSize: 8, fontStyle: "bold", cellPadding: 4 },
+      bodyStyles: { fontSize: 8, textColor: [40, 35, 25], cellPadding: 3.5 },
+      alternateRowStyles: { fillColor: [252, 250, 244] },
+      styles: { lineColor: [230, 220, 200], lineWidth: 0.2 },
+      columnStyles: { 0: { cellWidth: 8, halign: "center" } },
+      didDrawPage: () => pdfFooter(doc),
+    });
+
+    doc.save(`bella-guy-inquiries-${today}.pdf`);
+  }
+
   function sendWA(phone: string, msg: string) {
     let cleaned = phone.replace(/[\s\-\(\)\+]/g, "");
     if (cleaned.startsWith("91") && cleaned.length > 10) cleaned = cleaned.slice(2);
@@ -924,6 +1809,11 @@ export default function AdminPage() {
     ["revenue",   <TrendingUp size={16} />,      "Revenue", 0],
     ["staff",     <Users size={16} />,           "Staff", staffs.length],
     ["contacts",  <MessageSquare size={16} />,   "Messages", contacts.length],
+    ["inquiries", <Inbox size={16} />,           "Inquiries", inquiries.filter(i => i.status === "New").length],
+    ["customers", <UserCheck size={16} />,       "Customers", 0],
+    ["services",  <Scissors size={16} />,        "Services", 0],
+    ["homepage",  <Home size={16} />,            "Homepage", 0],
+    ["settings",  <SettingsIcon size={16} />,    "Settings", 0],
     ["backup",    <Database size={16} />,         "Backup", 0],
     ["logs",      <Activity size={16} />,         "Activity", activityLogs.length],
   ];
@@ -944,7 +1834,16 @@ export default function AdminPage() {
           <nav className="sb-nav">
             <div className="nav-label">Navigation</div>
             {NAV.map(([tab, icon, label, count]) => (
-              <button key={tab} className={`ni ${activeTab === tab ? "on" : ""}`} onClick={() => { setActiveTab(tab); setSidebarOpen(false); }}>
+              <button key={tab} className={`ni ${activeTab === tab ? "on" : ""}`} onClick={() => {
+                // These edit modals aren't scoped to the tab that opened them (they
+                // render unconditionally on their own form state), so switching tabs
+                // while one is open used to leave it floating over the new tab's
+                // content — close everything on every tab switch.
+                setSvcCatForm(null); setSvcForm(null);
+                setFeatureForm(null); setTestimonialForm(null); setGalleryForm(null); setFaqForm(null);
+                setActiveCustomer(null); setConfirmModal(null);
+                setActiveTab(tab); setSidebarOpen(false);
+              }}>
                 <span style={{ display:"flex", alignItems:"center", opacity: activeTab === tab ? 1 : 0.5 }}>{icon}</span>
                 <span style={{ flex: 1 }}>{label}</span>
                 {count > 0 && <span className="ni-badge">{count}</span>}
@@ -974,7 +1873,7 @@ export default function AdminPage() {
             <button className="mob-menu-btn" onClick={() => setSidebarOpen(true)}><Menu size={18}/></button>
             <div style={{ flex: 1 }}>
               <div className="tb-title">
-                { activeTab === "dashboard" ? "Dashboard" : activeTab === "bookings" ? "Appointments" : activeTab === "revenue" ? "Revenue Analytics" : activeTab === "staff" ? "Staff Management" : activeTab === "contacts" ? "Messages" : activeTab === "backup" ? "Backup" : "Activity Log" }
+                { activeTab === "dashboard" ? "Dashboard" : activeTab === "bookings" ? "Appointments" : activeTab === "revenue" ? "Revenue Analytics" : activeTab === "staff" ? "Staff Management" : activeTab === "contacts" ? "Messages" : activeTab === "inquiries" ? "Inquiries" : activeTab === "customers" ? "Customers" : activeTab === "services" ? "Services" : activeTab === "homepage" ? "Homepage" : activeTab === "settings" ? "Settings" : activeTab === "backup" ? "Backup" : "Activity Log" }
               </div>
               <div className="tb-sub">
                 {new Date().toLocaleDateString("en-IN", { weekday: "long", year: "numeric", month: "long", day: "numeric" })}
@@ -1498,6 +2397,1109 @@ export default function AdminPage() {
                     }
                   </tbody>
                 </table>
+              </div>
+            )}
+
+            {/* ── INQUIRIES TAB ── */}
+            {activeTab === "inquiries" && (<>
+              <div className="fb">
+                <div className="si">
+                  <span className="si-ic" style={{display:"flex",alignItems:"center"}}><Search size={14}/></span>
+                  <input placeholder="Search name, phone, service…" value={inquirySearch} onChange={e=>setInquirySearch(e.target.value)} />
+                </div>
+                <select
+                  className={`type-sel ${inquiryStatusFilter!=="all"?"active":""}`}
+                  value={inquiryStatusFilter}
+                  onChange={e => setInquiryStatusFilter(e.target.value)}
+                >
+                  <option value="all">All Statuses</option>
+                  {INQUIRY_STATUSES.map(s => <option key={s} value={s}>{s}</option>)}
+                </select>
+                {isAdmin && <button className="btn bg" onClick={pdfInquiries} style={{display:"inline-flex",alignItems:"center",gap:4}}><Download size={12}/>PDF</button>}
+                {isAdmin && <button className="btn bg" onClick={csvExportInquiries} style={{display:"inline-flex",alignItems:"center",gap:4}}><Download size={12}/>CSV</button>}
+              </div>
+
+              <div className="tw">
+                <table>
+                  <thead><tr>
+                    {["ID","Client","Phone","Email","Service","Preferred","Message","Status","Date","Actions"].map(h=><th key={h}>{h}</th>)}
+                  </tr></thead>
+                  <tbody>
+                    {filteredInquiries.length === 0
+                      ? <tr className="empty"><td colSpan={10}>No inquiries found</td></tr>
+                      : filteredInquiries.map(i => {
+                          const sc = INQUIRY_STATUS_CONFIG[i.status] || INQUIRY_STATUS_CONFIG["New"];
+                          return (
+                            <tr key={i.id}>
+                              <td style={{ color:"#c9a84c",fontSize:10,fontFamily:"monospace",fontWeight:600,whiteSpace:"nowrap" }}>INQ-{String(i.id).padStart(5,"0")}</td>
+                              <td style={{ whiteSpace:"nowrap" }}><div className="nc"><div className="av">{(i.full_name||"?")[0].toUpperCase()}</div><span style={{ fontWeight:500,color:"#eee" }}>{i.full_name}</span></div></td>
+                              <td style={{ fontFamily:"monospace",fontSize:11,color:"#484848",whiteSpace:"nowrap" }}>{i.phone}</td>
+                              <td style={{ fontSize:11,color:"#484848" }}>{i.email || "—"}</td>
+                              <td style={{ maxWidth:160,fontSize:12 }}>
+                                {i.inquiry_type === "franchise"
+                                  ? <span style={{ fontWeight:700,color:"#c9a84c" }}>💰 Franchise · {i.budget || "—"}</span>
+                                  : (i.service || "General")}
+                              </td>
+                              <td style={{ fontSize:11 }}>{i.preferred_contact}</td>
+                              <td style={{ color:"#888",maxWidth:220 }} title={i.message || ""}>{i.message || "—"}</td>
+                              <td>
+                                <div className="sw">
+                                  <span className="sd" style={{ background: sc.dot }} />
+                                  <select value={i.status||"New"} onChange={e => updateInquiryStatus(i.id, e.target.value)} className="ss" style={{ background:sc.bg,color:sc.text }}>
+                                    {INQUIRY_STATUSES.map(s=><option key={s}>{s}</option>)}
+                                  </select>
+                                </div>
+                              </td>
+                              <td style={{ fontFamily:"monospace",fontSize:10.5,color:"#484848",whiteSpace:"nowrap" }}>{i.created_at ? new Date(i.created_at).toLocaleString("en-IN", { day:"2-digit", month:"short", hour:"2-digit", minute:"2-digit" }) : "—"}</td>
+                              <td style={{ whiteSpace:"nowrap" }}>
+                                <div className="aw">
+                                  <a className="btn bv" href={`tel:+91${i.phone}`} style={{display:"inline-flex",alignItems:"center",gap:4,textDecoration:"none"}}><PhoneIcon size={12}/>Call</a>
+                                  <button className="btn bw" onClick={()=>sendWA(i.phone,`Hi ${i.full_name}, thanks for your inquiry with Bella & Guy Salon${i.service?` about ${i.service}`:""}! How can we help?`)} style={{display:"inline-flex",alignItems:"center",gap:4}}><MessageCircle size={12}/>WA</button>
+                                  {isAdmin && <button className="btn bd" title="Delete" onClick={()=>deleteInquiry(i.id)} style={{display:"inline-flex",alignItems:"center",justifyContent:"center"}}><Trash2 size={12}/></button>}
+                                </div>
+                              </td>
+                            </tr>
+                          );
+                        })
+                    }
+                  </tbody>
+                </table>
+              </div>
+            </>)}
+
+            {/* ── CUSTOMERS TAB ── */}
+            {activeTab === "customers" && (
+              <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
+                {customerMetaMissing && (
+                  <div style={{ background: "rgba(245,101,101,0.1)", border: "1px solid rgba(245,101,101,0.3)", borderRadius: 10, padding: "10px 14px", fontSize: 12.5, color: "#f87171" }}>
+                    Notes, tags and blacklist need one more table. Run <strong>supabase/customers.sql</strong> in the Supabase SQL Editor to enable them — the customer list below already works without it.
+                  </div>
+                )}
+                <div className="fb">
+                  <div className="si">
+                    <Search size={14} className="si-ic" />
+                    <input value={customerSearch} onChange={e => setCustomerSearch(e.target.value)} placeholder="Search name, phone, email…" />
+                  </div>
+                </div>
+                <div className="tw">
+                  <table>
+                    <thead>
+                      <tr>
+                        <th>Customer</th><th>Bookings</th><th>Lifetime Value</th><th>Last Visit</th><th>Favourite Service</th><th>Status</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {filteredCustomers.length === 0 ? (
+                        <tr className="empty"><td colSpan={6}>No customers yet — they'll show up here after their first booking or inquiry.</td></tr>
+                      ) : filteredCustomers.map(c => (
+                        <tr key={c.phone} style={{ cursor: "pointer" }} onClick={() => { setActiveCustomer(c.phone); setCustomerNotesDraft(c.notes); setCustomerTagsDraft(c.tags.join(", ")); setCustomerError(""); }}>
+                          <td>
+                            <div className="nc">
+                              <div className="av">{c.name.slice(0, 2).toUpperCase()}</div>
+                              <div>
+                                <div style={{ fontWeight: 600 }}>{c.name}</div>
+                                <div style={{ fontSize: 11, color: "#666" }}>{c.phone}</div>
+                              </div>
+                            </div>
+                          </td>
+                          <td>{c.totalBookings}</td>
+                          <td>₹{c.lifetimeValue.toLocaleString()}</td>
+                          <td>{c.lastVisit ? new Date(c.lastVisit + "T00:00:00").toLocaleDateString("en-IN") : "—"}</td>
+                          <td>{c.favouriteService}</td>
+                          <td>{c.blacklisted ? <span style={{ color: "#f56565", fontWeight: 600 }}>Blacklisted</span> : <span style={{ color: "#4fd080" }}>Active</span>}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+            )}
+
+            {/* ── Customer detail modal ── */}
+            {activeCustomer && (() => {
+              const c = customerProfiles.find(p => p.phone === activeCustomer);
+              if (!c) return null;
+              return (
+                <Modal
+                  width={520}
+                  onClose={() => setActiveCustomer(null)}
+                  title={
+                    <span style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
+                      <span>{c.name}</span>
+                      {c.blacklisted && <span style={{ color: "#f56565", fontSize: 11, fontWeight: 700 }}>BLACKLISTED</span>}
+                    </span>
+                  }
+                >
+                    <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
+                      <div style={{ display: "flex", gap: 16, fontSize: 12.5, color: "#999", flexWrap: "wrap" }}>
+                        <span><PhoneIcon size={11} style={{ verticalAlign: -1, marginRight: 4 }} />{c.phone}</span>
+                        {c.email && <span><Mail size={11} style={{ verticalAlign: -1, marginRight: 4 }} />{c.email}</span>}
+                      </div>
+                      <div className="sg" style={{ gridTemplateColumns: "repeat(3,1fr)" }}>
+                        <div className="sc"><div className="sc-lbl">Bookings</div><div className="sc-val" style={{ color: "#5ab4f5" }}>{c.totalBookings}</div></div>
+                        <div className="sc"><div className="sc-lbl">Lifetime Value</div><div className="sc-val" style={{ color: "#c9a84c" }}>₹{c.lifetimeValue.toLocaleString()}</div></div>
+                        <div className="sc"><div className="sc-lbl">Inquiries</div><div className="sc-val" style={{ color: "#e88c50" }}>{c.inquiries.length}</div></div>
+                      </div>
+
+                      <div>
+                        <label style={{ display: "block", fontSize: 10.5, color: "#666", marginBottom: 4 }}>Notes (staff-only)</label>
+                        <textarea value={customerNotesDraft} onChange={e => setCustomerNotesDraft(e.target.value)} rows={3}
+                          style={{ width: "100%", background: "rgba(255,255,255,0.03)", border: "1px solid rgba(255,255,255,0.08)", borderRadius: 8, padding: "9px 12px", color: "#eee", fontSize: 13, fontFamily: "inherit", resize: "vertical" }} />
+                      </div>
+                      <div>
+                        <label style={{ display: "block", fontSize: 10.5, color: "#666", marginBottom: 4 }}><TagIcon size={11} style={{ verticalAlign: -1, marginRight: 3 }} />Tags (comma-separated)</label>
+                        <input type="text" value={customerTagsDraft} placeholder="VIP, Bridal, Referral" onChange={e => setCustomerTagsDraft(e.target.value)}
+                          style={{ width: "100%", background: "rgba(255,255,255,0.03)", border: "1px solid rgba(255,255,255,0.08)", borderRadius: 8, padding: "9px 12px", color: "#eee", fontSize: 13 }} />
+                      </div>
+                      {customerError && <div style={{ color: "#f56565", fontSize: 12 }}>{customerError}</div>}
+                      <div style={{ display: "flex", gap: 8 }}>
+                        <button className="btn bg" disabled={customerSaving} style={{ flex: 1, padding: "9px 0" }}
+                          onClick={() => saveCustomerMeta(c.phone, { notes: customerNotesDraft, tags: customerTagsDraft.split(",").map(t => t.trim()).filter(Boolean) })}>
+                          {customerSaving ? "Saving…" : "Save Notes & Tags"}
+                        </button>
+                        <button className={c.blacklisted ? "btn bc" : "btn bx"} disabled={customerSaving}
+                          onClick={() => saveCustomerMeta(c.phone, { blacklisted: !c.blacklisted })}>
+                          {c.blacklisted ? "Remove from Blacklist" : "Blacklist"}
+                        </button>
+                      </div>
+
+                      <div>
+                        <div className="card-title" style={{ marginTop: 6 }}>Booking History</div>
+                        {c.bookings.length === 0 ? <div style={{ fontSize: 12.5, color: "#555" }}>No bookings yet.</div> : (
+                          <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+                            {c.bookings.map(b => (
+                              <div key={b.id} style={{ display: "flex", justifyContent: "space-between", gap: 10, padding: "8px 10px", borderRadius: 8, background: "rgba(255,255,255,0.02)", fontSize: 12 }}>
+                                <div>
+                                  <div style={{ color: "#ddd" }}>{b.service}</div>
+                                  <div style={{ color: "#666", fontSize: 11 }}>{b.booking_date ? new Date(b.booking_date + "T00:00:00").toLocaleDateString("en-IN") : "—"} · {b.booking_time}</div>
+                                </div>
+                                <span style={{ color: STATUS_CONFIG[b.status]?.text ?? "#999", flexShrink: 0 }}>{b.status}</span>
+                              </div>
+                            ))}
+                          </div>
+                        )}
+                      </div>
+
+                      {c.inquiries.length > 0 && (
+                        <div>
+                          <div className="card-title">Inquiry History</div>
+                          <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+                            {c.inquiries.map(i => (
+                              <div key={i.id} style={{ display: "flex", justifyContent: "space-between", gap: 10, padding: "8px 10px", borderRadius: 8, background: "rgba(255,255,255,0.02)", fontSize: 12 }}>
+                                <div>
+                                  <div style={{ color: "#ddd" }}>{i.service || i.message?.slice(0, 40) || "General Inquiry"}</div>
+                                  <div style={{ color: "#666", fontSize: 11 }}>{i.created_at ? new Date(i.created_at).toLocaleDateString("en-IN") : "—"}</div>
+                                </div>
+                                <span style={{ color: INQUIRY_STATUS_CONFIG[i.status]?.text ?? "#999", flexShrink: 0 }}>{i.status}</span>
+                              </div>
+                            ))}
+                          </div>
+                        </div>
+                      )}
+
+                      <button className="cm-cancel" onClick={() => setActiveCustomer(null)}>Close</button>
+                    </div>
+                </Modal>
+              );
+            })()}
+
+            {/* ── SERVICES TAB ── */}
+            {activeTab === "services" && (() => {
+              const notYetImported = staticCategories.filter(c => !dbCategories.some(d => d.id === c.id));
+              const q = svcSearch.trim().toLowerCase();
+              const filteredCats = q
+                ? dbCategories.filter(c =>
+                    c.label.toLowerCase().includes(q) ||
+                    dbServices.some(s => s.category_id === c.id && s.name.toLowerCase().includes(q))
+                  )
+                : dbCategories;
+              const activeCat = dbCategories.find(c => c.id === svcActiveCatId);
+              const activeCatServices = dbServices
+                .filter(s => s.category_id === svcActiveCatId)
+                .filter(s => !q || s.name.toLowerCase().includes(q));
+
+              if (svcTablesMissing) {
+                return (
+                  <div className="card" style={{ background: "rgba(245,101,101,0.07)", border: "1px solid rgba(245,101,101,0.3)", maxWidth: 640 }}>
+                    <div style={{ display: "flex", alignItems: "flex-start", gap: 12 }}>
+                      <AlertTriangle size={20} color="#f87171" style={{ flexShrink: 0, marginTop: 1 }} />
+                      <div>
+                        <div style={{ fontSize: 14.5, fontWeight: 700, color: "#f87171", marginBottom: 6 }}>
+                          Database setup required — that's why nothing shows here
+                        </div>
+                        <div style={{ fontSize: 12.5, color: "#bbb", lineHeight: 1.7 }}>
+                          This screen reads from two database tables that don't exist in your Supabase project yet. Until they're created, no service — old or new — can show up here, no matter what you click.
+                        </div>
+                        <ol style={{ fontSize: 12.5, color: "#ccc", lineHeight: 2, margin: "12px 0", paddingLeft: 18 }}>
+                          <li>Open your <strong style={{ color: "#e8c96d" }}>Supabase dashboard</strong> → left sidebar → <strong style={{ color: "#e8c96d" }}>SQL Editor</strong></li>
+                          <li>Click <strong style={{ color: "#e8c96d" }}>New query</strong></li>
+                          <li>In this project's code, open the file <strong style={{ color: "#e8c96d" }}>supabase/services.sql</strong>, select all, copy it</li>
+                          <li>Paste it into the SQL Editor and click <strong style={{ color: "#e8c96d" }}>Run</strong></li>
+                          <li>Come back here and click the button below</li>
+                        </ol>
+                        <button className="btn bg" disabled={svcChecking} onClick={loadCatalogRaw} style={{ display: "inline-flex", alignItems: "center", gap: 6 }}>
+                          {svcChecking ? <><Loader2 size={13} className="spin" />Checking…</> : <><RefreshCw size={13} />I've run it — check again</>}
+                        </button>
+                      </div>
+                    </div>
+                  </div>
+                );
+              }
+
+              return (
+                <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
+                  {notYetImported.length > 0 && (
+                    <div className="card" style={{ background: "rgba(201,168,76,0.06)", border: "1px solid rgba(201,168,76,0.25)" }}>
+                      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 14, flexWrap: "wrap" }}>
+                        <div>
+                          <div style={{ fontSize: 13.5, fontWeight: 700, color: "#e8c96d", marginBottom: 3 }}>
+                            {notYetImported.length} categor{notYetImported.length === 1 ? "y" : "ies"} from your existing site menu {notYetImported.length === 1 ? "isn't" : "aren't"} here yet
+                          </div>
+                          <div style={{ fontSize: 12, color: "#999" }}>
+                            One click copies your current Waxing, Facials, Hair Color etc. (and every service inside them) into this screen, so you can edit or add photos to any of them — nothing on the live site changes until you edit here.
+                          </div>
+                        </div>
+                        <button className="btn bg" disabled={svcImporting} onClick={importStaticCatalog} style={{ display: "inline-flex", alignItems: "center", gap: 6, whiteSpace: "nowrap" }}>
+                          {svcImporting ? <><Loader2 size={13} className="spin" />Importing…</> : <><Download size={13} />Bring in my existing services</>}
+                        </button>
+                      </div>
+                      {svcImportMsg && <div style={{ fontSize: 12, color: "#8ce0a8", marginTop: 10 }}>{svcImportMsg}</div>}
+                    </div>
+                  )}
+
+                  {svcError && (
+                    <div style={{ background: "rgba(245,101,101,0.1)", border: "1px solid rgba(245,101,101,0.3)", borderRadius: 10, padding: "10px 14px", fontSize: 12.5, color: "#f87171" }}>
+                      {svcError}
+                    </div>
+                  )}
+
+                  <div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
+                    <div style={{ position: "relative", maxWidth: 360, flex: "1 1 220px" }}>
+                      <Search size={14} style={{ position: "absolute", left: 12, top: "50%", transform: "translateY(-50%)", color: "#555" }} />
+                      <input
+                        value={svcSearch}
+                        onChange={e => setSvcSearch(e.target.value)}
+                        placeholder="Search categories or services…"
+                        style={{
+                          width: "100%", padding: "9px 12px 9px 34px", borderRadius: 10, fontSize: 12.5,
+                          background: "rgba(255,255,255,0.03)", border: "1px solid rgba(255,255,255,0.08)", color: "#ddd",
+                        }}
+                      />
+                    </div>
+                    <button
+                      className={reorderLocked ? "btn bg" : "btn bv"}
+                      onClick={toggleReorderLock}
+                      title={reorderLocked ? "Order is locked — click to enable drag-and-drop reordering" : "Order is unlocked — click to lock and prevent accidental reordering"}
+                      style={{ display: "inline-flex", alignItems: "center", gap: 6, whiteSpace: "nowrap" }}
+                    >
+                      {reorderLocked ? <><Lock size={12} />Order Locked</> : <><Unlock size={12} />Order Unlocked</>}
+                    </button>
+                  </div>
+
+                  <div style={{ display: "grid", gridTemplateColumns: "320px 1fr", gap: 16, alignItems: "start" }}>
+                    {/* Categories */}
+                    <div className="card">
+                      <div className="card-title" style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
+                        <span style={{ display: "flex", alignItems: "center", gap: 7 }}><Layers size={14} />Categories</span>
+                        <button className="btn bg" onClick={() => setSvcCatForm({ gender: "both", home_service: true, images: [] })} style={{ display: "inline-flex", alignItems: "center", gap: 4 }}>
+                          <Plus size={12} />Add Category
+                        </button>
+                      </div>
+                      {dbCategories.length === 0 ? (
+                        <div style={{ color: "#444", fontSize: 12.5, padding: "10px 0", lineHeight: 1.6 }}>
+                          Nothing here yet. Click <strong style={{ color: "#c9a84c" }}>"Bring in my existing services"</strong> above to load your current menu, or add a brand-new category with "Add Category".
+                        </div>
+                      ) : filteredCats.length === 0 ? (
+                        <div style={{ color: "#444", fontSize: 12.5, padding: "10px 0" }}>No categories or services match "{svcSearch}".</div>
+                      ) : (
+                        <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+                          {filteredCats.map(cat => {
+                            const count = dbServices.filter(s => s.category_id === cat.id).length;
+                            const isActive = svcActiveCatId === cat.id;
+                            return (
+                              <div key={cat.id}
+                                onClick={() => setSvcActiveCatId(cat.id)}
+                                draggable={!reorderLocked}
+                                onDragStart={e => { e.stopPropagation(); setDraggedCategoryId(cat.id); }}
+                                onDragOver={e => { e.preventDefault(); e.stopPropagation(); if (dragOverCategoryId !== cat.id) setDragOverCategoryId(cat.id); }}
+                                onDragLeave={() => setDragOverCategoryId(id => id === cat.id ? null : id)}
+                                onDrop={e => {
+                                  e.preventDefault(); e.stopPropagation();
+                                  setDragOverCategoryId(null);
+                                  if (draggedCategoryId != null) reorderCategoryByDrag(draggedCategoryId, cat.id);
+                                  setDraggedCategoryId(null);
+                                }}
+                                onDragEnd={() => { setDraggedCategoryId(null); setDragOverCategoryId(null); }}
+                                style={{
+                                  display: "flex", alignItems: "center", gap: 10, padding: "9px 10px", borderRadius: 12, cursor: isActive || reorderLocked ? "pointer" : "grab",
+                                  background: isActive ? "rgba(201,168,76,0.1)" : "rgba(255,255,255,0.02)",
+                                  border: dragOverCategoryId === cat.id ? "1px solid #c9a84c" : `1px solid ${isActive ? "rgba(201,168,76,0.35)" : "rgba(255,255,255,0.05)"}`,
+                                  boxShadow: dragOverCategoryId === cat.id ? "0 0 0 3px rgba(201,168,76,0.15)" : "none",
+                                  opacity: draggedCategoryId === cat.id ? 0.4 : 1,
+                                  transition: "border-color 0.15s ease, box-shadow 0.15s ease, opacity 0.15s ease",
+                                }}>
+                                {reorderLocked
+                                  ? <Lock size={12} color="#444" style={{ flexShrink: 0 }} />
+                                  : <GripVertical size={13} color="#555" style={{ flexShrink: 0, cursor: "grab" }} />}
+                                <div style={{
+                                  width: 40, height: 40, borderRadius: "50%", flexShrink: 0, overflow: "hidden",
+                                  border: `2px solid ${isActive ? "#c9a84c" : "rgba(255,255,255,0.1)"}`,
+                                  display: "flex", alignItems: "center", justifyContent: "center",
+                                  background: cat.images?.[0] ? "transparent" : "rgba(201,168,76,0.1)", fontSize: 17,
+                                }}>
+                                  {cat.images?.[0] ? <img src={cat.images[0]} alt="" style={{ width: "100%", height: "100%", objectFit: "cover" }} /> : cat.icon}
+                                </div>
+                                <div style={{ flex: 1, minWidth: 0 }}>
+                                  <div style={{ fontSize: 12.5, fontWeight: 700, color: isActive ? "#e8c96d" : "#ddd", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{cat.label}</div>
+                                  <div style={{ fontSize: 10.5, color: "#555" }}>{count} service{count !== 1 ? "s" : ""} · {cat.gender}</div>
+                                </div>
+                                <button className="btn bv" onClick={e => { e.stopPropagation(); setSvcCatForm(cat); }} style={{ padding: 5 }}><Pencil size={11} /></button>
+                                <button className="btn bx" onClick={e => { e.stopPropagation(); deleteCategory(cat); }} style={{ padding: 5 }}><Trash2 size={11} /></button>
+                              </div>
+                            );
+                          })}
+                        </div>
+                      )}
+                    </div>
+
+                    {/* Services within selected category — image-card grid, matching the live site */}
+                    <div className="card">
+                      {!svcActiveCatId || !activeCat ? (
+                        <div style={{ color: "#444", fontSize: 13, padding: "40px 0", textAlign: "center" }}>
+                          <Layers size={22} color="#333" style={{ marginBottom: 10 }} />
+                          <div>Select a category on the left to view and edit its services.</div>
+                        </div>
+                      ) : (
+                        <>
+                          <div className="card-title" style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
+                            <span style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                              <span style={{ fontSize: 17 }}>{activeCat.icon}</span>
+                              {activeCat.label}
+                              <span style={{ fontSize: 11, fontWeight: 500, color: "#666" }}>({activeCatServices.length})</span>
+                            </span>
+                            <button className="btn bg" onClick={() => setSvcForm({ category_id: svcActiveCatId, popular: false, images: [] })} style={{ display: "inline-flex", alignItems: "center", gap: 4 }}>
+                              <Plus size={12} />Add Service
+                            </button>
+                          </div>
+                          {activeCatServices.length === 0 ? (
+                            <div style={{ color: "#444", fontSize: 12.5, padding: "10px 0" }}>
+                              {q ? `No services match "${svcSearch}" in this category.` : "No services in this category yet — click \"Add Service\" to create one."}
+                            </div>
+                          ) : (
+                            <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(180px, 1fr))", gap: 14 }}>
+                              {activeCatServices.map(svc => (
+                                <div key={svc.id}
+                                  draggable={!reorderLocked}
+                                  onDragStart={() => setDraggedServiceId(svc.id)}
+                                  onDragOver={e => { e.preventDefault(); if (dragOverServiceId !== svc.id) setDragOverServiceId(svc.id); }}
+                                  onDragLeave={() => setDragOverServiceId(id => id === svc.id ? null : id)}
+                                  onDrop={e => {
+                                    e.preventDefault();
+                                    setDragOverServiceId(null);
+                                    if (draggedServiceId != null) reorderServiceByDrag(activeCatServices, draggedServiceId, svc.id);
+                                    setDraggedServiceId(null);
+                                  }}
+                                  onDragEnd={() => { setDraggedServiceId(null); setDragOverServiceId(null); }}
+                                  style={{
+                                    borderRadius: 12, overflow: "hidden", background: "rgba(255,255,255,0.02)",
+                                    border: dragOverServiceId === svc.id ? "1px solid #c9a84c" : "1px solid rgba(255,255,255,0.06)",
+                                    boxShadow: dragOverServiceId === svc.id ? "0 0 0 3px rgba(201,168,76,0.15)" : "none",
+                                    opacity: draggedServiceId === svc.id ? 0.4 : 1,
+                                    cursor: reorderLocked ? "default" : "grab", transition: "border-color 0.15s ease, box-shadow 0.15s ease, opacity 0.15s ease",
+                                  }}>
+                                  <div style={{ position: "relative", width: "100%", aspectRatio: "4 / 3", background: "rgba(255,255,255,0.04)" }}>
+                                    {svc.images?.[0] && <img src={svc.images[0]} alt={svc.name} style={{ width: "100%", height: "100%", objectFit: "cover" }} />}
+                                    <span title={reorderLocked ? "Order locked — unlock to reorder" : "Drag to reorder"} style={{ position: "absolute", top: 8, left: 8, display: "flex", alignItems: "center", justifyContent: "center", width: 22, height: 22, borderRadius: 7, background: "rgba(0,0,0,0.6)", backdropFilter: "blur(4px)", color: "rgba(255,255,255,0.75)", cursor: reorderLocked ? "default" : "grab" }}>
+                                      {reorderLocked ? <Lock size={11} /> : <GripVertical size={12} />}
+                                    </span>
+                                    {svc.group_name && (
+                                      <span style={{ position: "absolute", top: 8, left: 36, background: "rgba(0,0,0,0.65)", color: "#fff", fontSize: 9.5, fontWeight: 700, padding: "3px 8px", borderRadius: 20, maxWidth: "calc(100% - 44px)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                                        {svc.group_name}
+                                      </span>
+                                    )}
+                                    {svc.popular && (
+                                      <span style={{ position: "absolute", top: 8, right: 8, display: "flex", alignItems: "center", justifyContent: "center", width: 22, height: 22, borderRadius: "50%", background: "rgba(201,168,76,0.9)" }}>
+                                        <Star size={11} color="#080808" fill="#080808" />
+                                      </span>
+                                    )}
+                                  </div>
+                                  <div style={{ padding: "10px 11px" }}>
+                                    <div style={{ fontSize: 12, fontWeight: 700, color: "#ddd", lineHeight: 1.3, marginBottom: 4, minHeight: 30 }}>{svc.name}</div>
+                                    <div style={{ fontSize: 12.5, fontWeight: 700, color: "#c9a84c", marginBottom: 8 }}>
+                                      ₹{svc.price.toLocaleString()}{svc.duration ? <span style={{ fontSize: 10.5, color: "#555", fontWeight: 500 }}> · {svc.duration}</span> : ""}
+                                    </div>
+                                    <div style={{ display: "flex", gap: 6 }}>
+                                      <button className="btn bv" onClick={() => setSvcForm(svc)} style={{ flex: 1, display: "inline-flex", alignItems: "center", justifyContent: "center", gap: 4, padding: "6px 0" }}><Pencil size={11} />Edit</button>
+                                      <button className="btn bx" onClick={() => deleteService(svc)} style={{ padding: "6px 9px" }}><Trash2 size={11} /></button>
+                                    </div>
+                                  </div>
+                                </div>
+                              ))}
+                            </div>
+                          )}
+                        </>
+                      )}
+                    </div>
+                  </div>
+                </div>
+              );
+            })()}
+
+            {/* ── Category add/edit modal ── */}
+            {svcCatForm && (
+              <Modal title={dbCategories.some(c => c.id === svcCatForm.id) ? "Edit Category" : "Add Category"} onClose={() => setSvcCatForm(null)}>
+                    <div>
+                      <label style={{ display: "block", fontSize: 10.5, color: "#666", marginBottom: 4 }}>Category ID (slug, e.g. "bridal-makeup") *</label>
+                      <input type="text" value={svcCatForm.id ?? ""} disabled={dbCategories.some(c => c.id === svcCatForm.id)}
+                        onChange={e => setSvcCatForm(f => ({ ...f, id: e.target.value.toLowerCase().replace(/[^a-z0-9-]/g, "-") }))}
+                        style={{ width: "100%", background: "rgba(255,255,255,0.03)", border: "1px solid rgba(255,255,255,0.08)", borderRadius: 8, padding: "9px 12px", color: "#eee", fontSize: 13 }} />
+                    </div>
+                    <div>
+                      <label style={{ display: "block", fontSize: 10.5, color: "#666", marginBottom: 4 }}>Label *</label>
+                      <input type="text" value={svcCatForm.label ?? ""} onChange={e => setSvcCatForm(f => ({ ...f, label: e.target.value }))}
+                        style={{ width: "100%", background: "rgba(255,255,255,0.03)", border: "1px solid rgba(255,255,255,0.08)", borderRadius: 8, padding: "9px 12px", color: "#eee", fontSize: 13 }} />
+                    </div>
+                    <div>
+                      <label style={{ display: "block", fontSize: 10.5, color: "#666", marginBottom: 4 }}>Description</label>
+                      <textarea value={svcCatForm.description ?? ""} onChange={e => setSvcCatForm(f => ({ ...f, description: e.target.value }))} rows={2}
+                        style={{ width: "100%", background: "rgba(255,255,255,0.03)", border: "1px solid rgba(255,255,255,0.08)", borderRadius: 8, padding: "9px 12px", color: "#eee", fontSize: 13, fontFamily: "inherit", resize: "vertical" }} />
+                    </div>
+                    <div style={{ display: "flex", gap: 10 }}>
+                      <div style={{ flex: 1 }}>
+                        <label style={{ display: "block", fontSize: 10.5, color: "#666", marginBottom: 4 }}>Icon (emoji)</label>
+                        <input type="text" value={svcCatForm.icon ?? ""} onChange={e => setSvcCatForm(f => ({ ...f, icon: e.target.value }))}
+                          style={{ width: "100%", background: "rgba(255,255,255,0.03)", border: "1px solid rgba(255,255,255,0.08)", borderRadius: 8, padding: "9px 12px", color: "#eee", fontSize: 13 }} />
+                      </div>
+                      <div style={{ flex: 1 }}>
+                        <label style={{ display: "block", fontSize: 10.5, color: "#666", marginBottom: 4 }}>Accent color</label>
+                        <input type="text" value={svcCatForm.color ?? ""} placeholder="#f5f5f5" onChange={e => setSvcCatForm(f => ({ ...f, color: e.target.value }))}
+                          style={{ width: "100%", background: "rgba(255,255,255,0.03)", border: "1px solid rgba(255,255,255,0.08)", borderRadius: 8, padding: "9px 12px", color: "#eee", fontSize: 13 }} />
+                      </div>
+                    </div>
+                    <div style={{ display: "flex", gap: 10, alignItems: "center" }}>
+                      <div style={{ flex: 1 }}>
+                        <label style={{ display: "block", fontSize: 10.5, color: "#666", marginBottom: 4 }}>Gender</label>
+                        <select value={svcCatForm.gender ?? "both"} onChange={e => setSvcCatForm(f => ({ ...f, gender: e.target.value as any }))}
+                          style={{ width: "100%", background: "rgba(255,255,255,0.03)", border: "1px solid rgba(255,255,255,0.08)", borderRadius: 8, padding: "9px 12px", color: "#eee", fontSize: 13 }}>
+                          <option value="both">Both</option>
+                          <option value="female">Female</option>
+                          <option value="male">Male</option>
+                        </select>
+                      </div>
+                      <label style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 12, color: "#aaa", marginTop: 18 }}>
+                        <input type="checkbox" checked={svcCatForm.home_service ?? true} onChange={e => setSvcCatForm(f => ({ ...f, home_service: e.target.checked }))} />
+                        Home service
+                      </label>
+                    </div>
+                    <div>
+                      <label style={{ display: "block", fontSize: 10.5, color: "#666", marginBottom: 4 }}>Images</label>
+                      <div style={{ display: "flex", flexWrap: "wrap", gap: 8, marginBottom: 8 }}>
+                        {(svcCatForm.images ?? []).map((url, i) => (
+                          <div key={i} style={{ position: "relative" }}>
+                            <img src={url} alt="" style={{ width: 56, height: 56, borderRadius: 8, objectFit: "cover" }} />
+                            <button onClick={() => setSvcCatForm(f => ({ ...f, images: (f?.images ?? []).filter((_, j) => j !== i) }))}
+                              style={{ position: "absolute", top: -6, right: -6, width: 18, height: 18, borderRadius: "50%", background: "#f56565", border: "none", color: "#fff", cursor: "pointer", fontSize: 10 }}>×</button>
+                          </div>
+                        ))}
+                      </div>
+                      <label className="btn bg" style={{ display: "inline-flex", alignItems: "center", gap: 5, cursor: "pointer" }}>
+                        <ImagePlus size={12} />{svcUploading ? "Uploading…" : "Upload Images"}
+                        <input type="file" accept="image/*" multiple hidden disabled={svcUploading} onChange={e => handleSvcImageUpload(e.target.files, "category")} />
+                      </label>
+                    </div>
+                    {svcError && <div style={{ color: "#f56565", fontSize: 12 }}>{svcError}</div>}
+                    <div style={{ display: "flex", gap: 8, marginTop: 6 }}>
+                      <button className="btn bg" disabled={svcSaving} onClick={saveCategory} style={{ flex: 1, padding: "9px 0" }}>{svcSaving ? "Saving…" : "Save"}</button>
+                      <button className="cm-cancel" onClick={() => { setSvcCatForm(null); setSvcError(""); }}>Cancel</button>
+                    </div>
+              </Modal>
+            )}
+
+            {/* ── Service add/edit modal ── */}
+            {svcForm && (
+              <Modal title={svcForm.id ? "Edit Service" : "Add Service"} onClose={() => setSvcForm(null)}>
+                    <div>
+                      <label style={{ display: "block", fontSize: 10.5, color: "#666", marginBottom: 4 }}>Category *</label>
+                      <select value={svcForm.category_id ?? ""} onChange={e => setSvcForm(f => ({ ...f, category_id: e.target.value }))}
+                        style={{ width: "100%", background: "rgba(255,255,255,0.03)", border: "1px solid rgba(255,255,255,0.08)", borderRadius: 8, padding: "9px 12px", color: "#eee", fontSize: 13 }}>
+                        {dbCategories.map(c => <option key={c.id} value={c.id}>{c.icon} {c.label}</option>)}
+                      </select>
+                    </div>
+                    <div>
+                      <label style={{ display: "block", fontSize: 10.5, color: "#666", marginBottom: 4 }}>Service Name *</label>
+                      <input type="text" value={svcForm.name ?? ""} onChange={e => setSvcForm(f => ({ ...f, name: e.target.value }))}
+                        style={{ width: "100%", background: "rgba(255,255,255,0.03)", border: "1px solid rgba(255,255,255,0.08)", borderRadius: 8, padding: "9px 12px", color: "#eee", fontSize: 13 }} />
+                    </div>
+                    <div style={{ display: "flex", gap: 10 }}>
+                      <div style={{ flex: 1 }}>
+                        <label style={{ display: "block", fontSize: 10.5, color: "#666", marginBottom: 4 }}>Price (₹) *</label>
+                        <input type="number" value={svcForm.price ?? ""}
+                          onChange={e => { const v = e.target.value; setSvcForm(f => ({ ...f, price: v === "" ? undefined : Number(v) })); }}
+                          style={{ width: "100%", background: "rgba(255,255,255,0.03)", border: "1px solid rgba(255,255,255,0.08)", borderRadius: 8, padding: "9px 12px", color: "#eee", fontSize: 13 }} />
+                      </div>
+                      <div style={{ flex: 1 }}>
+                        <label style={{ display: "block", fontSize: 10.5, color: "#666", marginBottom: 4 }}>Duration</label>
+                        <input type="text" placeholder="45 mins" value={svcForm.duration ?? ""} onChange={e => setSvcForm(f => ({ ...f, duration: e.target.value }))}
+                          style={{ width: "100%", background: "rgba(255,255,255,0.03)", border: "1px solid rgba(255,255,255,0.08)", borderRadius: 8, padding: "9px 12px", color: "#eee", fontSize: 13 }} />
+                      </div>
+                      <div style={{ flex: 1 }}>
+                        <label style={{ display: "block", fontSize: 10.5, color: "#666", marginBottom: 4 }}>Discount %</label>
+                        <input type="number" min={0} max={100} placeholder="0" value={svcForm.discount_percent ?? ""}
+                          onChange={e => { const v = e.target.value; setSvcForm(f => ({ ...f, discount_percent: v === "" ? undefined : Number(v) })); }}
+                          style={{ width: "100%", background: "rgba(255,255,255,0.03)", border: "1px solid rgba(255,255,255,0.08)", borderRadius: 8, padding: "9px 12px", color: "#eee", fontSize: 13 }} />
+                      </div>
+                    </div>
+                    <div>
+                      <label style={{ display: "block", fontSize: 10.5, color: "#666", marginBottom: 4 }}>Sub-group / brand (optional, e.g. "Kanpeki Pura Labs")</label>
+                      <input type="text" value={svcForm.group_name ?? ""} onChange={e => setSvcForm(f => ({ ...f, group_name: e.target.value }))}
+                        style={{ width: "100%", background: "rgba(255,255,255,0.03)", border: "1px solid rgba(255,255,255,0.08)", borderRadius: 8, padding: "9px 12px", color: "#eee", fontSize: 13 }} />
+                    </div>
+                    <div>
+                      <label style={{ display: "block", fontSize: 10.5, color: "#666", marginBottom: 4 }}>Section heading (optional, e.g. "Japanese Rituals" — groups several brands under one heading in the grid)</label>
+                      <input type="text" value={svcForm.section ?? ""} onChange={e => setSvcForm(f => ({ ...f, section: e.target.value }))}
+                        style={{ width: "100%", background: "rgba(255,255,255,0.03)", border: "1px solid rgba(255,255,255,0.08)", borderRadius: 8, padding: "9px 12px", color: "#eee", fontSize: 13 }} />
+                    </div>
+                    <div>
+                      <label style={{ display: "block", fontSize: 10.5, color: "#666", marginBottom: 4 }}>Description (short, shown on cards)</label>
+                      <textarea value={svcForm.description ?? ""} onChange={e => setSvcForm(f => ({ ...f, description: e.target.value }))} rows={2}
+                        style={{ width: "100%", background: "rgba(255,255,255,0.03)", border: "1px solid rgba(255,255,255,0.08)", borderRadius: 8, padding: "9px 12px", color: "#eee", fontSize: 13, fontFamily: "inherit", resize: "vertical" }} />
+                    </div>
+                    <div>
+                      <label style={{ display: "block", fontSize: 10.5, color: "#666", marginBottom: 4 }}>Long Description (shown on the service's own page)</label>
+                      <textarea value={svcForm.long_description ?? ""} onChange={e => setSvcForm(f => ({ ...f, long_description: e.target.value }))} rows={3}
+                        style={{ width: "100%", background: "rgba(255,255,255,0.03)", border: "1px solid rgba(255,255,255,0.08)", borderRadius: 8, padding: "9px 12px", color: "#eee", fontSize: 13, fontFamily: "inherit", resize: "vertical" }} />
+                    </div>
+                    <div style={{ display: "flex", gap: 16 }}>
+                      <label style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 12, color: "#aaa" }}>
+                        <input type="checkbox" checked={svcForm.popular ?? false} onChange={e => setSvcForm(f => ({ ...f, popular: e.target.checked }))} />
+                        Mark as "Popular"
+                      </label>
+                      <label style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 12, color: "#aaa" }}>
+                        <input type="checkbox" checked={svcForm.trending ?? false} onChange={e => setSvcForm(f => ({ ...f, trending: e.target.checked }))} />
+                        Mark as "Trending"
+                      </label>
+                    </div>
+                    <div>
+                      <label style={{ display: "block", fontSize: 10.5, color: "#666", marginBottom: 4 }}>What's Included (steps, shown as a checklist)</label>
+                      <RepeatableList items={svcForm.included_steps ?? []} placeholder="e.g. Cleansing" onChange={v => setSvcForm(f => ({ ...f, included_steps: v }))} />
+                    </div>
+                    <div>
+                      <label style={{ display: "block", fontSize: 10.5, color: "#666", marginBottom: 4 }}>Benefits</label>
+                      <RepeatableList items={svcForm.benefits ?? []} placeholder="e.g. Deep hydration" onChange={v => setSvcForm(f => ({ ...f, benefits: v }))} />
+                    </div>
+                    <div>
+                      <label style={{ display: "block", fontSize: 10.5, color: "#666", marginBottom: 4 }}>Service FAQs</label>
+                      <RepeatableFaqs items={svcForm.faqs ?? []} onChange={v => setSvcForm(f => ({ ...f, faqs: v }))} />
+                    </div>
+                    <div>
+                      <label style={{ display: "block", fontSize: 10.5, color: "#666", marginBottom: 4 }}>Images (first one is the card thumbnail)</label>
+                      <div style={{ display: "flex", flexWrap: "wrap", gap: 8, marginBottom: 8 }}>
+                        {(svcForm.images ?? []).map((url, i) => (
+                          <div key={i} style={{ position: "relative" }}>
+                            <img src={url} alt="" style={{ width: 56, height: 56, borderRadius: 8, objectFit: "cover" }} />
+                            <button onClick={() => setSvcForm(f => ({ ...f, images: (f?.images ?? []).filter((_, j) => j !== i) }))}
+                              style={{ position: "absolute", top: -6, right: -6, width: 18, height: 18, borderRadius: "50%", background: "#f56565", border: "none", color: "#fff", cursor: "pointer", fontSize: 10 }}>×</button>
+                          </div>
+                        ))}
+                      </div>
+                      <label className="btn bg" style={{ display: "inline-flex", alignItems: "center", gap: 5, cursor: "pointer" }}>
+                        <ImagePlus size={12} />{svcUploading ? "Uploading…" : "Upload Images"}
+                        <input type="file" accept="image/*" multiple hidden disabled={svcUploading} onChange={e => handleSvcImageUpload(e.target.files, "service")} />
+                      </label>
+                    </div>
+                    <div style={{ display: "flex", gap: 10 }}>
+                      <div style={{ flex: 1 }}>
+                        <label style={{ display: "block", fontSize: 10.5, color: "#666", marginBottom: 4 }}>Before Photos</label>
+                        <div style={{ display: "flex", flexWrap: "wrap", gap: 8, marginBottom: 8 }}>
+                          {(svcForm.before_images ?? []).map((url, i) => (
+                            <div key={i} style={{ position: "relative" }}>
+                              <img src={url} alt="" style={{ width: 56, height: 56, borderRadius: 8, objectFit: "cover" }} />
+                              <button onClick={() => setSvcForm(f => ({ ...f, before_images: (f?.before_images ?? []).filter((_, j) => j !== i) }))}
+                                style={{ position: "absolute", top: -6, right: -6, width: 18, height: 18, borderRadius: "50%", background: "#f56565", border: "none", color: "#fff", cursor: "pointer", fontSize: 10 }}>×</button>
+                            </div>
+                          ))}
+                        </div>
+                        <label className="btn bg" style={{ display: "inline-flex", alignItems: "center", gap: 5, cursor: "pointer" }}>
+                          <ImagePlus size={12} />Upload
+                          <input type="file" accept="image/*" multiple hidden disabled={svcUploading} onChange={e => handleSvcImageUpload(e.target.files, "before")} />
+                        </label>
+                      </div>
+                      <div style={{ flex: 1 }}>
+                        <label style={{ display: "block", fontSize: 10.5, color: "#666", marginBottom: 4 }}>After Photos</label>
+                        <div style={{ display: "flex", flexWrap: "wrap", gap: 8, marginBottom: 8 }}>
+                          {(svcForm.after_images ?? []).map((url, i) => (
+                            <div key={i} style={{ position: "relative" }}>
+                              <img src={url} alt="" style={{ width: 56, height: 56, borderRadius: 8, objectFit: "cover" }} />
+                              <button onClick={() => setSvcForm(f => ({ ...f, after_images: (f?.after_images ?? []).filter((_, j) => j !== i) }))}
+                                style={{ position: "absolute", top: -6, right: -6, width: 18, height: 18, borderRadius: "50%", background: "#f56565", border: "none", color: "#fff", cursor: "pointer", fontSize: 10 }}>×</button>
+                            </div>
+                          ))}
+                        </div>
+                        <label className="btn bg" style={{ display: "inline-flex", alignItems: "center", gap: 5, cursor: "pointer" }}>
+                          <ImagePlus size={12} />Upload
+                          <input type="file" accept="image/*" multiple hidden disabled={svcUploading} onChange={e => handleSvcImageUpload(e.target.files, "after")} />
+                        </label>
+                      </div>
+                    </div>
+                    {svcError && <div style={{ color: "#f56565", fontSize: 12 }}>{svcError}</div>}
+                    <div style={{ display: "flex", gap: 8, marginTop: 6 }}>
+                      <button className="btn bg" disabled={svcSaving} onClick={saveService} style={{ flex: 1, padding: "9px 0" }}>{svcSaving ? "Saving…" : "Save"}</button>
+                      <button className="cm-cancel" onClick={() => { setSvcForm(null); setSvcError(""); }}>Cancel</button>
+                    </div>
+              </Modal>
+            )}
+
+            {/* ── HOMEPAGE TAB ── */}
+            {activeTab === "homepage" && (() => {
+              if (homeTablesMissing) {
+                return (
+                  <div className="card" style={{ background: "rgba(245,101,101,0.07)", border: "1px solid rgba(245,101,101,0.3)", maxWidth: 640 }}>
+                    <div style={{ display: "flex", alignItems: "flex-start", gap: 12 }}>
+                      <AlertTriangle size={20} color="#f87171" style={{ flexShrink: 0, marginTop: 1 }} />
+                      <div>
+                        <div style={{ fontSize: 14.5, fontWeight: 700, color: "#f87171", marginBottom: 6 }}>
+                          Database setup required — that's why nothing shows here
+                        </div>
+                        <div style={{ fontSize: 12.5, color: "#bbb", lineHeight: 1.7 }}>
+                          This screen reads from database tables that don't exist in your Supabase project yet.
+                        </div>
+                        <ol style={{ fontSize: 12.5, color: "#ccc", lineHeight: 2, margin: "12px 0", paddingLeft: 18 }}>
+                          <li>Open your <strong style={{ color: "#e8c96d" }}>Supabase dashboard</strong> → left sidebar → <strong style={{ color: "#e8c96d" }}>SQL Editor</strong></li>
+                          <li>Click <strong style={{ color: "#e8c96d" }}>New query</strong></li>
+                          <li>In this project's code, open the file <strong style={{ color: "#e8c96d" }}>supabase/homepage.sql</strong>, select all, copy it</li>
+                          <li>Paste it into the SQL Editor and click <strong style={{ color: "#e8c96d" }}>Run</strong></li>
+                          <li>Come back here and click the button below</li>
+                        </ol>
+                        <button className="btn bg" disabled={homeChecking} onClick={loadHomepageRaw} style={{ display: "inline-flex", alignItems: "center", gap: 6 }}>
+                          {homeChecking ? <><Loader2 size={13} className="spin" />Checking…</> : <><RefreshCw size={13} />I've run it — check again</>}
+                        </button>
+                      </div>
+                    </div>
+                  </div>
+                );
+              }
+
+              const SECTIONS: { key: typeof homeSection; label: string; count: number }[] = [
+                { key: "features",     label: "Why Choose Us", count: dbFeatures.length },
+                { key: "testimonials", label: "Testimonials",  count: dbTestimonials.length },
+                { key: "gallery",      label: "Gallery",       count: dbGalleryImages.length },
+                { key: "faqs",         label: "FAQ",           count: dbFaqs.length },
+              ];
+
+              const notYetImportedHome = dbTestimonials.length === 0 || dbGalleryImages.length === 0 || dbFaqs.length === 0;
+
+              return (
+                <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
+                  {notYetImportedHome && (
+                    <div className="card" style={{ background: "rgba(201,168,76,0.06)", border: "1px solid rgba(201,168,76,0.25)" }}>
+                      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 14, flexWrap: "wrap" }}>
+                        <div>
+                          <div style={{ fontSize: 13.5, fontWeight: 700, color: "#e8c96d", marginBottom: 3 }}>
+                            What's already live on your homepage isn't here yet
+                          </div>
+                          <div style={{ fontSize: 12, color: "#999" }}>
+                            One click copies your current testimonials, gallery photos and FAQs into this screen, so you can edit or replace any of them — nothing on the live site changes until you edit here. (Why Choose Us cards stay as they are — their icons are custom-drawn and would look worse imported as emoji. Use "Add Card" if you want extra ones.)
+                          </div>
+                        </div>
+                        <button className="btn bg" disabled={homeImporting} onClick={importHomepageDefaults} style={{ display: "inline-flex", alignItems: "center", gap: 6, whiteSpace: "nowrap" }}>
+                          {homeImporting ? <><Loader2 size={13} className="spin" />Importing…</> : <><Download size={13} />Bring in what's live now</>}
+                        </button>
+                      </div>
+                      {homeImportMsg && <div style={{ fontSize: 12, color: "#8ce0a8", marginTop: 10 }}>{homeImportMsg}</div>}
+                    </div>
+                  )}
+
+                  {homeError && (
+                    <div style={{ background: "rgba(245,101,101,0.1)", border: "1px solid rgba(245,101,101,0.3)", borderRadius: 10, padding: "10px 14px", fontSize: 12.5, color: "#f87171" }}>
+                      {homeError}
+                    </div>
+                  )}
+
+                  <div className="fb-btns">
+                    {SECTIONS.map(sec => (
+                      <button key={sec.key} className={`fb-btn ${homeSection === sec.key ? "on" : ""}`} onClick={() => setHomeSection(sec.key)}>
+                        {sec.label} ({sec.count})
+                      </button>
+                    ))}
+                  </div>
+
+                  {homeSection === "features" && (
+                    <div className="card">
+                      <div className="card-title" style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
+                        <span>Why Choose Us Cards</span>
+                        <button className="btn bg" onClick={() => setFeatureForm({ icon: "✨", visible: true })} style={{ display: "inline-flex", alignItems: "center", gap: 4 }}><Plus size={12} />Add Card</button>
+                      </div>
+                      {dbFeatures.length === 0 ? (
+                        <div style={{ color: "#444", fontSize: 12.5, padding: "10px 0" }}>No cards yet — the live site shows its built-in defaults until you add some here.</div>
+                      ) : (
+                        <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+                          {dbFeatures.map(f => (
+                            <div key={f.id} style={{ display: "flex", alignItems: "center", gap: 12, padding: "9px 10px", borderRadius: 12, background: "rgba(255,255,255,0.02)", border: "1px solid rgba(255,255,255,0.05)" }}>
+                              <span style={{ fontSize: 20, width: 28, textAlign: "center", flexShrink: 0 }}>{f.icon}</span>
+                              <div style={{ flex: 1, minWidth: 0 }}>
+                                <div style={{ fontSize: 12.5, fontWeight: 700, color: "#ddd" }}>{f.title}{!f.visible && <span style={{ marginLeft: 8, fontSize: 9.5, color: "#f87171", fontWeight: 700 }}>HIDDEN</span>}</div>
+                                <div style={{ fontSize: 11, color: "#666", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{f.description}</div>
+                              </div>
+                              <HomeRowActions visible={f.visible} onMoveUp={() => moveHomeRow("homepage_features", dbFeatures, f.id, -1)} onMoveDown={() => moveHomeRow("homepage_features", dbFeatures, f.id, 1)} onToggleVisible={() => toggleHomeVisible("homepage_features", f.id, !f.visible)} />
+                              <button className="btn bv" onClick={() => setFeatureForm(f)} style={{ padding: 5 }}><Pencil size={11} /></button>
+                              <button className="btn bx" onClick={() => deleteHomeRow("homepage_features", f.id, f.title)} style={{ padding: 5 }}><Trash2 size={11} /></button>
+                            </div>
+                          ))}
+                        </div>
+                      )}
+                    </div>
+                  )}
+
+                  {homeSection === "testimonials" && (
+                    <div className="card">
+                      <div className="card-title" style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
+                        <span>Testimonials</span>
+                        <button className="btn bg" onClick={() => setTestimonialForm({ rating: 5, visible: true })} style={{ display: "inline-flex", alignItems: "center", gap: 4 }}><Plus size={12} />Add Testimonial</button>
+                      </div>
+                      {dbTestimonials.length === 0 ? (
+                        <div style={{ color: "#444", fontSize: 12.5, padding: "10px 0" }}>No testimonials yet — the live site shows its built-in defaults until you add some here.</div>
+                      ) : (
+                        <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+                          {dbTestimonials.map(t => (
+                            <div key={t.id} style={{ display: "flex", alignItems: "center", gap: 12, padding: "9px 10px", borderRadius: 12, background: "rgba(255,255,255,0.02)", border: "1px solid rgba(255,255,255,0.05)" }}>
+                              <div style={{ width: 34, height: 34, borderRadius: "50%", flexShrink: 0, overflow: "hidden", background: "rgba(201,168,76,0.1)", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 11, fontWeight: 700, color: "#c9a84c" }}>
+                                {t.photo ? <img src={t.photo} alt="" style={{ width: "100%", height: "100%", objectFit: "cover" }} /> : (t.initials || t.name.slice(0, 2).toUpperCase())}
+                              </div>
+                              <div style={{ flex: 1, minWidth: 0 }}>
+                                <div style={{ fontSize: 12.5, fontWeight: 700, color: "#ddd" }}>{t.name} <span style={{ color: "#c9a84c" }}>{"★".repeat(t.rating)}</span>{!t.visible && <span style={{ marginLeft: 8, fontSize: 9.5, color: "#f87171", fontWeight: 700 }}>HIDDEN</span>}</div>
+                                <div style={{ fontSize: 11, color: "#666", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{t.review}</div>
+                              </div>
+                              <HomeRowActions visible={t.visible} onMoveUp={() => moveHomeRow("testimonials", dbTestimonials, t.id, -1)} onMoveDown={() => moveHomeRow("testimonials", dbTestimonials, t.id, 1)} onToggleVisible={() => toggleHomeVisible("testimonials", t.id, !t.visible)} />
+                              <button className="btn bv" onClick={() => setTestimonialForm(t)} style={{ padding: 5 }}><Pencil size={11} /></button>
+                              <button className="btn bx" onClick={() => deleteHomeRow("testimonials", t.id, t.name)} style={{ padding: 5 }}><Trash2 size={11} /></button>
+                            </div>
+                          ))}
+                        </div>
+                      )}
+                    </div>
+                  )}
+
+                  {homeSection === "gallery" && (
+                    <div className="card">
+                      <div className="card-title" style={{ display: "flex", alignItems: "center", justifyContent: "space-between", flexWrap: "wrap", gap: 8 }}>
+                        <span>Gallery Photos</span>
+                        <div style={{ display: "flex", gap: 8 }}>
+                          <label className="btn bg" style={{ display: "inline-flex", alignItems: "center", gap: 4, cursor: "pointer" }}>
+                            <ImagePlus size={12} />{homeUploading ? "Uploading…" : "Upload Multiple"}
+                            <input type="file" accept="image/*" multiple hidden disabled={homeUploading} onChange={e => handleBulkGalleryUpload(e.target.files)} />
+                          </label>
+                          <button className="btn bg" onClick={() => setGalleryForm({ visible: true })} style={{ display: "inline-flex", alignItems: "center", gap: 4 }}><Plus size={12} />Add Photo</button>
+                        </div>
+                      </div>
+                      {dbGalleryImages.length === 0 ? (
+                        <div style={{ color: "#444", fontSize: 12.5, padding: "10px 0" }}>No photos yet — the live site shows its built-in defaults until you add some here.</div>
+                      ) : (
+                        <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(180px, 1fr))", gap: 14 }}>
+                          {dbGalleryImages.map(g => (
+                            <div key={g.id} style={{ borderRadius: 12, overflow: "hidden", background: "rgba(255,255,255,0.02)", border: "1px solid rgba(255,255,255,0.06)" }}>
+                              <div style={{ position: "relative", width: "100%", aspectRatio: "4 / 3", background: "rgba(255,255,255,0.04)" }}>
+                                {g.src && <img src={g.src} alt={g.label ?? ""} style={{ width: "100%", height: "100%", objectFit: "cover" }} />}
+                                {!g.visible && <span style={{ position: "absolute", top: 8, left: 8, background: "rgba(245,101,101,0.85)", color: "#fff", fontSize: 9.5, fontWeight: 700, padding: "3px 8px", borderRadius: 20 }}>HIDDEN</span>}
+                              </div>
+                              <div style={{ padding: "10px 11px" }}>
+                                <div style={{ fontSize: 12, fontWeight: 700, color: "#ddd", marginBottom: 6 }}>{g.label || "Untitled"}</div>
+                                <div style={{ display: "flex", gap: 6, alignItems: "center" }}>
+                                  <HomeRowActions visible={g.visible} onMoveUp={() => moveHomeRow("gallery_images", dbGalleryImages, g.id, -1)} onMoveDown={() => moveHomeRow("gallery_images", dbGalleryImages, g.id, 1)} onToggleVisible={() => toggleHomeVisible("gallery_images", g.id, !g.visible)} />
+                                  <button className="btn bv" onClick={() => setGalleryForm(g)} style={{ flex: 1, padding: "6px 0" }}><Pencil size={11} /></button>
+                                  <button className="btn bx" onClick={() => deleteHomeRow("gallery_images", g.id, g.label || "photo")} style={{ padding: "6px 9px" }}><Trash2 size={11} /></button>
+                                </div>
+                              </div>
+                            </div>
+                          ))}
+                        </div>
+                      )}
+                    </div>
+                  )}
+
+                  {homeSection === "faqs" && (
+                    <div className="card">
+                      <div className="card-title" style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
+                        <span>FAQs</span>
+                        <button className="btn bg" onClick={() => setFaqForm({ visible: true })} style={{ display: "inline-flex", alignItems: "center", gap: 4 }}><Plus size={12} />Add FAQ</button>
+                      </div>
+                      {dbFaqs.length === 0 ? (
+                        <div style={{ color: "#444", fontSize: 12.5, padding: "10px 0" }}>No FAQs yet — the live site shows its built-in defaults until you add some here.</div>
+                      ) : (
+                        <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+                          {dbFaqs.map(q => (
+                            <div key={q.id} style={{ display: "flex", alignItems: "center", gap: 12, padding: "9px 10px", borderRadius: 12, background: "rgba(255,255,255,0.02)", border: "1px solid rgba(255,255,255,0.05)" }}>
+                              <div style={{ flex: 1, minWidth: 0 }}>
+                                <div style={{ fontSize: 12.5, fontWeight: 700, color: "#ddd" }}>{q.question}{!q.visible && <span style={{ marginLeft: 8, fontSize: 9.5, color: "#f87171", fontWeight: 700 }}>HIDDEN</span>}</div>
+                                <div style={{ fontSize: 11, color: "#666", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{q.answer}</div>
+                              </div>
+                              <HomeRowActions visible={q.visible} onMoveUp={() => moveHomeRow("faqs", dbFaqs, q.id, -1)} onMoveDown={() => moveHomeRow("faqs", dbFaqs, q.id, 1)} onToggleVisible={() => toggleHomeVisible("faqs", q.id, !q.visible)} />
+                              <button className="btn bv" onClick={() => setFaqForm(q)} style={{ padding: 5 }}><Pencil size={11} /></button>
+                              <button className="btn bx" onClick={() => deleteHomeRow("faqs", q.id, q.question)} style={{ padding: 5 }}><Trash2 size={11} /></button>
+                            </div>
+                          ))}
+                        </div>
+                      )}
+                    </div>
+                  )}
+                </div>
+              );
+            })()}
+
+            {/* ── Why Choose Us card add/edit modal ── */}
+            {featureForm && (
+              <Modal title={featureForm.id ? "Edit Card" : "Add Card"} onClose={() => setFeatureForm(null)}>
+                    <div>
+                      <label style={{ display: "block", fontSize: 10.5, color: "#666", marginBottom: 4 }}>Icon (emoji)</label>
+                      <input type="text" value={featureForm.icon ?? ""} onChange={e => setFeatureForm(f => ({ ...f, icon: e.target.value }))}
+                        style={{ width: "100%", background: "rgba(255,255,255,0.03)", border: "1px solid rgba(255,255,255,0.08)", borderRadius: 8, padding: "9px 12px", color: "#eee", fontSize: 13 }} />
+                    </div>
+                    <div>
+                      <label style={{ display: "block", fontSize: 10.5, color: "#666", marginBottom: 4 }}>Title *</label>
+                      <input type="text" value={featureForm.title ?? ""} onChange={e => setFeatureForm(f => ({ ...f, title: e.target.value }))}
+                        style={{ width: "100%", background: "rgba(255,255,255,0.03)", border: "1px solid rgba(255,255,255,0.08)", borderRadius: 8, padding: "9px 12px", color: "#eee", fontSize: 13 }} />
+                    </div>
+                    <div>
+                      <label style={{ display: "block", fontSize: 10.5, color: "#666", marginBottom: 4 }}>Description</label>
+                      <textarea value={featureForm.description ?? ""} onChange={e => setFeatureForm(f => ({ ...f, description: e.target.value }))} rows={2}
+                        style={{ width: "100%", background: "rgba(255,255,255,0.03)", border: "1px solid rgba(255,255,255,0.08)", borderRadius: 8, padding: "9px 12px", color: "#eee", fontSize: 13, fontFamily: "inherit", resize: "vertical" }} />
+                    </div>
+                    <div>
+                      <label style={{ display: "block", fontSize: 10.5, color: "#666", marginBottom: 4 }}>Small badge (optional)</label>
+                      <input type="text" placeholder="15+ on staff" value={featureForm.badge ?? ""} onChange={e => setFeatureForm(f => ({ ...f, badge: e.target.value }))}
+                        style={{ width: "100%", background: "rgba(255,255,255,0.03)", border: "1px solid rgba(255,255,255,0.08)", borderRadius: 8, padding: "9px 12px", color: "#eee", fontSize: 13 }} />
+                    </div>
+                    <label style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 12, color: "#aaa" }}>
+                      <input type="checkbox" checked={featureForm.visible ?? true} onChange={e => setFeatureForm(f => ({ ...f, visible: e.target.checked }))} />
+                      Visible on site
+                    </label>
+                    {homeError && <div style={{ color: "#f56565", fontSize: 12 }}>{homeError}</div>}
+                    <div style={{ display: "flex", gap: 8, marginTop: 6 }}>
+                      <button className="btn bg" disabled={homeSaving} onClick={async () => {
+                        if (!featureForm.title) { setHomeError("Title is required."); return; }
+                        if (await saveHomeRow("homepage_features", featureForm, featureForm.title!)) setFeatureForm(null);
+                      }} style={{ flex: 1, padding: "9px 0" }}>{homeSaving ? "Saving…" : "Save"}</button>
+                      <button className="cm-cancel" onClick={() => { setFeatureForm(null); setHomeError(""); }}>Cancel</button>
+                    </div>
+              </Modal>
+            )}
+
+            {/* ── Testimonial add/edit modal ── */}
+            {testimonialForm && (
+              <Modal title={testimonialForm.id ? "Edit Testimonial" : "Add Testimonial"} onClose={() => setTestimonialForm(null)}>
+                    <div>
+                      <label style={{ display: "block", fontSize: 10.5, color: "#666", marginBottom: 4 }}>Customer Name *</label>
+                      <input type="text" value={testimonialForm.name ?? ""} onChange={e => setTestimonialForm(f => ({ ...f, name: e.target.value }))}
+                        style={{ width: "100%", background: "rgba(255,255,255,0.03)", border: "1px solid rgba(255,255,255,0.08)", borderRadius: 8, padding: "9px 12px", color: "#eee", fontSize: 13 }} />
+                    </div>
+                    <div style={{ display: "flex", gap: 10 }}>
+                      <div style={{ flex: 1 }}>
+                        <label style={{ display: "block", fontSize: 10.5, color: "#666", marginBottom: 4 }}>Location</label>
+                        <input type="text" placeholder="2 weeks ago" value={testimonialForm.location ?? ""} onChange={e => setTestimonialForm(f => ({ ...f, location: e.target.value }))}
+                          style={{ width: "100%", background: "rgba(255,255,255,0.03)", border: "1px solid rgba(255,255,255,0.08)", borderRadius: 8, padding: "9px 12px", color: "#eee", fontSize: 13 }} />
+                      </div>
+                      <div style={{ flex: 1 }}>
+                        <label style={{ display: "block", fontSize: 10.5, color: "#666", marginBottom: 4 }}>Service</label>
+                        <input type="text" placeholder="Bridal Makeup" value={testimonialForm.service ?? ""} onChange={e => setTestimonialForm(f => ({ ...f, service: e.target.value }))}
+                          style={{ width: "100%", background: "rgba(255,255,255,0.03)", border: "1px solid rgba(255,255,255,0.08)", borderRadius: 8, padding: "9px 12px", color: "#eee", fontSize: 13 }} />
+                      </div>
+                    </div>
+                    <div>
+                      <label style={{ display: "block", fontSize: 10.5, color: "#666", marginBottom: 4 }}>Review *</label>
+                      <textarea value={testimonialForm.review ?? ""} onChange={e => setTestimonialForm(f => ({ ...f, review: e.target.value }))} rows={3}
+                        style={{ width: "100%", background: "rgba(255,255,255,0.03)", border: "1px solid rgba(255,255,255,0.08)", borderRadius: 8, padding: "9px 12px", color: "#eee", fontSize: 13, fontFamily: "inherit", resize: "vertical" }} />
+                    </div>
+                    <div style={{ display: "flex", gap: 10 }}>
+                      <div style={{ flex: 1 }}>
+                        <label style={{ display: "block", fontSize: 10.5, color: "#666", marginBottom: 4 }}>Rating (1-5)</label>
+                        <select value={testimonialForm.rating ?? 5} onChange={e => setTestimonialForm(f => ({ ...f, rating: Number(e.target.value) }))}
+                          style={{ width: "100%", background: "rgba(255,255,255,0.03)", border: "1px solid rgba(255,255,255,0.08)", borderRadius: 8, padding: "9px 12px", color: "#eee", fontSize: 13 }}>
+                          {[5, 4, 3, 2, 1].map(n => <option key={n} value={n}>{n} ★</option>)}
+                        </select>
+                      </div>
+                      <div style={{ flex: 1 }}>
+                        <label style={{ display: "block", fontSize: 10.5, color: "#666", marginBottom: 4 }}>Initials (if no photo)</label>
+                        <input type="text" placeholder="PS" maxLength={2} value={testimonialForm.initials ?? ""} onChange={e => setTestimonialForm(f => ({ ...f, initials: e.target.value.toUpperCase() }))}
+                          style={{ width: "100%", background: "rgba(255,255,255,0.03)", border: "1px solid rgba(255,255,255,0.08)", borderRadius: 8, padding: "9px 12px", color: "#eee", fontSize: 13 }} />
+                      </div>
+                    </div>
+                    <div>
+                      <label style={{ display: "block", fontSize: 10.5, color: "#666", marginBottom: 4 }}>Photo (optional)</label>
+                      <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+                        {testimonialForm.photo && <img src={testimonialForm.photo} alt="" style={{ width: 44, height: 44, borderRadius: "50%", objectFit: "cover" }} />}
+                        <label className="btn bg" style={{ display: "inline-flex", alignItems: "center", gap: 5, cursor: "pointer" }}>
+                          <ImagePlus size={12} />{homeUploading ? "Uploading…" : "Upload Photo"}
+                          <input type="file" accept="image/*" hidden disabled={homeUploading} onChange={e => handleTestimonialPhotoUpload(e.target.files)} />
+                        </label>
+                      </div>
+                    </div>
+                    <label style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 12, color: "#aaa" }}>
+                      <input type="checkbox" checked={testimonialForm.visible ?? true} onChange={e => setTestimonialForm(f => ({ ...f, visible: e.target.checked }))} />
+                      Visible on site
+                    </label>
+                    {homeError && <div style={{ color: "#f56565", fontSize: 12 }}>{homeError}</div>}
+                    <div style={{ display: "flex", gap: 8, marginTop: 6 }}>
+                      <button className="btn bg" disabled={homeSaving} onClick={async () => {
+                        if (!testimonialForm.name || !testimonialForm.review) { setHomeError("Name and review are required."); return; }
+                        if (await saveHomeRow("testimonials", testimonialForm, testimonialForm.name!)) setTestimonialForm(null);
+                      }} style={{ flex: 1, padding: "9px 0" }}>{homeSaving ? "Saving…" : "Save"}</button>
+                      <button className="cm-cancel" onClick={() => { setTestimonialForm(null); setHomeError(""); }}>Cancel</button>
+                    </div>
+              </Modal>
+            )}
+
+            {/* ── Gallery photo add/edit modal ── */}
+            {galleryForm && (
+              <Modal title={galleryForm.id ? "Edit Photo" : "Add Photo"} onClose={() => setGalleryForm(null)}>
+                    <div>
+                      <label style={{ display: "block", fontSize: 10.5, color: "#666", marginBottom: 4 }}>Photo *</label>
+                      {galleryForm.src && <img src={galleryForm.src} alt="" style={{ width: "100%", aspectRatio: "4/3", objectFit: "cover", borderRadius: 8, marginBottom: 8 }} />}
+                      <label className="btn bg" style={{ display: "inline-flex", alignItems: "center", gap: 5, cursor: "pointer" }}>
+                        <ImagePlus size={12} />{homeUploading ? "Uploading…" : galleryForm.src ? "Replace Photo" : "Upload Photo"}
+                        <input type="file" accept="image/*" multiple hidden disabled={homeUploading} onChange={e => handleGalleryImageUpload(e.target.files)} />
+                      </label>
+                    </div>
+                    <div>
+                      <label style={{ display: "block", fontSize: 10.5, color: "#666", marginBottom: 4 }}>Label</label>
+                      <input type="text" placeholder="Styling Area" value={galleryForm.label ?? ""} onChange={e => setGalleryForm(f => ({ ...f, label: e.target.value }))}
+                        style={{ width: "100%", background: "rgba(255,255,255,0.03)", border: "1px solid rgba(255,255,255,0.08)", borderRadius: 8, padding: "9px 12px", color: "#eee", fontSize: 13 }} />
+                    </div>
+                    <div>
+                      <label style={{ display: "block", fontSize: 10.5, color: "#666", marginBottom: 4 }}>Subtext</label>
+                      <input type="text" placeholder="Premium chairs & modern ambiance" value={galleryForm.sub ?? ""} onChange={e => setGalleryForm(f => ({ ...f, sub: e.target.value }))}
+                        style={{ width: "100%", background: "rgba(255,255,255,0.03)", border: "1px solid rgba(255,255,255,0.08)", borderRadius: 8, padding: "9px 12px", color: "#eee", fontSize: 13 }} />
+                    </div>
+                    <label style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 12, color: "#aaa" }}>
+                      <input type="checkbox" checked={galleryForm.visible ?? true} onChange={e => setGalleryForm(f => ({ ...f, visible: e.target.checked }))} />
+                      Visible on site
+                    </label>
+                    {homeError && <div style={{ color: "#f56565", fontSize: 12 }}>{homeError}</div>}
+                    <div style={{ display: "flex", gap: 8, marginTop: 6 }}>
+                      <button className="btn bg" disabled={homeSaving} onClick={async () => {
+                        if (!galleryForm.src) { setHomeError("Please upload a photo first."); return; }
+                        if (await saveHomeRow("gallery_images", galleryForm, galleryForm.label || "photo")) setGalleryForm(null);
+                      }} style={{ flex: 1, padding: "9px 0" }}>{homeSaving ? "Saving…" : "Save"}</button>
+                      <button className="cm-cancel" onClick={() => { setGalleryForm(null); setHomeError(""); }}>Cancel</button>
+                    </div>
+              </Modal>
+            )}
+
+            {/* ── FAQ add/edit modal ── */}
+            {faqForm && (
+              <Modal title={faqForm.id ? "Edit FAQ" : "Add FAQ"} onClose={() => setFaqForm(null)}>
+                    <div>
+                      <label style={{ display: "block", fontSize: 10.5, color: "#666", marginBottom: 4 }}>Question *</label>
+                      <input type="text" value={faqForm.question ?? ""} onChange={e => setFaqForm(f => ({ ...f, question: e.target.value }))}
+                        style={{ width: "100%", background: "rgba(255,255,255,0.03)", border: "1px solid rgba(255,255,255,0.08)", borderRadius: 8, padding: "9px 12px", color: "#eee", fontSize: 13 }} />
+                    </div>
+                    <div>
+                      <label style={{ display: "block", fontSize: 10.5, color: "#666", marginBottom: 4 }}>Answer *</label>
+                      <textarea value={faqForm.answer ?? ""} onChange={e => setFaqForm(f => ({ ...f, answer: e.target.value }))} rows={3}
+                        style={{ width: "100%", background: "rgba(255,255,255,0.03)", border: "1px solid rgba(255,255,255,0.08)", borderRadius: 8, padding: "9px 12px", color: "#eee", fontSize: 13, fontFamily: "inherit", resize: "vertical" }} />
+                    </div>
+                    <label style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 12, color: "#aaa" }}>
+                      <input type="checkbox" checked={faqForm.visible ?? true} onChange={e => setFaqForm(f => ({ ...f, visible: e.target.checked }))} />
+                      Visible on site
+                    </label>
+                    {homeError && <div style={{ color: "#f56565", fontSize: 12 }}>{homeError}</div>}
+                    <div style={{ display: "flex", gap: 8, marginTop: 6 }}>
+                      <button className="btn bg" disabled={homeSaving} onClick={async () => {
+                        if (!faqForm.question || !faqForm.answer) { setHomeError("Question and answer are required."); return; }
+                        if (await saveHomeRow("faqs", faqForm, faqForm.question!)) setFaqForm(null);
+                      }} style={{ flex: 1, padding: "9px 0" }}>{homeSaving ? "Saving…" : "Save"}</button>
+                      <button className="cm-cancel" onClick={() => { setFaqForm(null); setHomeError(""); }}>Cancel</button>
+                    </div>
+              </Modal>
+            )}
+
+            {/* ── SETTINGS TAB ── */}
+            {activeTab === "settings" && (
+              <div style={{ maxWidth: 640, display: "flex", flexDirection: "column", gap: 16 }}>
+                {settingsError && (
+                  <div style={{ display: "flex", alignItems: "flex-start", gap: 8, background: "rgba(245,101,101,0.1)", border: "1px solid rgba(245,101,101,0.3)", borderRadius: 10, padding: "12px 14px", fontSize: 12.5, color: "#f56565" }}>
+                    <AlertCircle size={15} style={{ flexShrink: 0, marginTop: 1 }} />
+                    <span>{settingsError}</span>
+                  </div>
+                )}
+                {SETTING_GROUPS.map(group => (
+                  <div key={group.title} style={{ background: "rgba(255,255,255,0.02)", border: "1px solid rgba(255,255,255,0.06)", borderRadius: 14, overflow: "hidden" }}>
+                    <div style={{ display: "flex", alignItems: "center", gap: 10, padding: "14px 18px", borderBottom: "1px solid rgba(255,255,255,0.05)" }}>
+                      <group.icon size={15} color="#c9a84c" />
+                      <span style={{ fontSize: 13.5, fontWeight: 700, color: "#ddd" }}>{group.title}</span>
+                    </div>
+                    <div style={{ padding: 18, display: "flex", flexDirection: "column", gap: 14 }}>
+                      {group.keys.map(field => field.key === "hero_bg_image" ? (
+                        <div key={field.key}>
+                          <label style={{ display: "block", fontSize: 10.5, fontWeight: 700, letterSpacing: "0.06em", textTransform: "uppercase", color: "#666", marginBottom: 8 }}>
+                            Background Images {getHeroImages().length > 1 && <span style={{ color: "#c9a84c" }}>({getHeroImages().length} — slides automatically on the site)</span>}
+                          </label>
+                          {getHeroImages().length > 0 && (
+                            <div style={{ display: "flex", flexWrap: "wrap", gap: 10, marginBottom: 10 }}>
+                              {getHeroImages().map((url, i) => (
+                                <div key={url} style={{ position: "relative", width: 110 }}>
+                                  <div style={{ width: 110, height: 74, borderRadius: 8, overflow: "hidden", background: "rgba(255,255,255,0.04)", border: "1px solid rgba(255,255,255,0.08)" }}>
+                                    <img src={url} alt={`Hero background ${i + 1}`} style={{ width: "100%", height: "100%", objectFit: "cover" }} />
+                                  </div>
+                                  <div style={{ display: "flex", justifyContent: "space-between", marginTop: 4 }}>
+                                    <a href={url} target="_blank" rel="noreferrer" title="View full size" style={{ fontSize: 10, color: "#7ba8ff", textDecoration: "none", display: "inline-flex", alignItems: "center", gap: 3 }}>
+                                      <Eye size={10} />View
+                                    </a>
+                                    <button onClick={() => removeHeroImage(url)} title="Remove" style={{ background: "none", border: "none", color: "#f56565", cursor: "pointer", fontSize: 10, padding: 0, display: "inline-flex", alignItems: "center", gap: 3 }}>
+                                      <Trash2 size={10} />Remove
+                                    </button>
+                                  </div>
+                                </div>
+                              ))}
+                            </div>
+                          )}
+                          <label className="btn bg" style={{ display: "inline-flex", alignItems: "center", gap: 5, cursor: "pointer" }}>
+                            <ImagePlus size={12} />{heroImgUploading ? "Uploading…" : "Upload Image(s)"}
+                            <input type="file" accept="image/*" multiple hidden disabled={heroImgUploading} onChange={e => handleHeroImageUpload(e.target.files)} />
+                          </label>
+                          <p style={{ fontSize: 11, color: "#555", marginTop: 6 }}>
+                            Each image here shows exactly as it will on the live homepage banner — add more than one and they'll auto-rotate.
+                          </p>
+                        </div>
+                      ) : (
+                        <div key={field.key} style={{ display: "flex", alignItems: "flex-end", gap: 10 }}>
+                          <div style={{ flex: 1 }}>
+                            <label style={{ display: "block", fontSize: 10.5, fontWeight: 700, letterSpacing: "0.06em", textTransform: "uppercase", color: "#666", marginBottom: 6 }}>
+                              {field.label}
+                            </label>
+                            {field.multiline ? (
+                              <textarea
+                                placeholder={field.placeholder}
+                                value={settings[field.key] ?? ""}
+                                onChange={e => setSettings(p => ({ ...p, [field.key]: e.target.value }))}
+                                rows={2}
+                                style={{ width: "100%", background: "rgba(255,255,255,0.03)", border: "1px solid rgba(255,255,255,0.08)", borderRadius: 8, padding: "9px 12px", color: "#eee", fontSize: 13, fontFamily: "inherit", resize: "vertical" }}
+                              />
+                            ) : (
+                              <input
+                                type="text"
+                                placeholder={field.placeholder}
+                                value={settings[field.key] ?? ""}
+                                onChange={e => setSettings(p => ({ ...p, [field.key]: e.target.value }))}
+                                style={{ width: "100%", background: "rgba(255,255,255,0.03)", border: "1px solid rgba(255,255,255,0.08)", borderRadius: 8, padding: "9px 12px", color: "#eee", fontSize: 13, fontFamily: "inherit" }}
+                              />
+                            )}
+                          </div>
+                          <button
+                            className="btn bg"
+                            disabled={savingKey === field.key}
+                            onClick={() => saveSetting(field.key)}
+                            style={{ display: "inline-flex", alignItems: "center", gap: 5, whiteSpace: "nowrap" }}
+                          >
+                            {savedKey === field.key ? <CheckCircle size={12} /> : <Save size={12} />}
+                            {savedKey === field.key ? "Saved" : savingKey === field.key ? "Saving…" : "Save"}
+                          </button>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                ))}
+                <p style={{ fontSize: 11.5, color: "#555" }}>
+                  Each field saves independently — click "Save" next to a field after changing it.
+                </p>
               </div>
             )}
 

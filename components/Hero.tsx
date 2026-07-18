@@ -1,13 +1,17 @@
 "use client";
 import Image from "next/image";
 import { useEffect, useRef, useState } from "react";
+import InquiryButton from "./InquiryButton";
+import { getPublicSettings } from "@/lib/settings";
 
-const STATS = [
-  { raw: 2000, suffix: "+", label: "Happy Clients" },
+const DEFAULT_STATS = [
+  { raw: 5000, suffix: "+", label: "Happy Clients" },
   { raw: 50,   suffix: "+", label: "Services" },
   { raw: 8,    suffix: "+", label: "Years Experience" },
   { raw: 4.9,  suffix: "★", label: "Google Rating" },
 ];
+
+const DEFAULT_TRUST = ["Certified Professionals", "100% Original Products", "On-time Guarantee", "No Hidden Charges", "GST Included", "Trusted Brands Only", "No Convenience Charge", "Free Consultation"];
 
 function useCounter(target: number, started: boolean, duration = 1600) {
   const [value, setValue] = useState(0);
@@ -55,7 +59,43 @@ export default function Hero() {
   const [textVisible, setTextVisible]   = useState(false);
   const [statsVisible, setStatsVisible] = useState(false);
   const [mounted, setMounted]           = useState(false);
+  const [s, setS] = useState<Record<string, string>>({});
   const bgRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => { getPublicSettings().then(setS); }, []);
+
+  const badge = s.hero_badge || "Wave City's Premium Home Beauty Service";
+  const heading1 = s.hero_heading_1 || "Premium";
+  const heading2 = s.hero_heading_2 || "Salon";
+  const headingGold = s.hero_heading_gold || "At Your Doorstep";
+  const tagline = s.hero_tagline || "Professional beauty services, delivered to the comfort of your home.";
+  const ctaLabel = s.hero_cta_label || "Book Home Service →";
+  const ctaHref = s.hero_cta_href || "/book";
+  const secondaryLabel = s.hero_secondary_label || "📞 Call Now";
+  const secondaryHref = s.hero_secondary_href || "tel:+919625928495";
+  const bgImages = (() => {
+    try {
+      const parsed = JSON.parse(s.hero_bg_images || "[]");
+      if (Array.isArray(parsed) && parsed.length) return parsed as string[];
+    } catch {}
+    return [s.hero_bg_image || "/images/salon-front.jpg"];
+  })();
+  const [bgIdx, setBgIdx] = useState(0);
+  useEffect(() => {
+    if (bgImages.length < 2) return;
+    const t = setInterval(() => setBgIdx(i => (i + 1) % bgImages.length), 5500);
+    return () => clearInterval(t);
+  }, [bgImages.length]);
+  const trustList = [1, 2, 3, 4, 5, 6, 7, 8].map(n => s[`trust_${n}`]).filter(Boolean);
+  const trust = trustList.length > 0 ? trustList : DEFAULT_TRUST;
+  const stats = DEFAULT_STATS.map((d, i) => {
+    const n = i + 1;
+    return {
+      raw: parseFloat(s[`stat${n}_value`] ?? "") || d.raw,
+      suffix: s[`stat${n}_suffix`] || d.suffix,
+      label: s[`stat${n}_label`] || d.label,
+    };
+  });
 
   useEffect(() => {
     setMounted(true);
@@ -359,8 +399,11 @@ export default function Hero() {
       <section id="home" className="hero-section">
         {/* Background with parallax */}
         <div ref={bgRef} className="hero-bg-wrap">
-          <Image src="/images/salon-front.jpg" alt="Bella & Guy Salon" fill
-            style={{ objectFit: "cover", objectPosition: "center 30%" }} priority />
+          {bgImages.map((src, i) => (
+            <Image key={src} src={src} alt="Bella & Guy Salon" fill
+              style={{ objectFit: "cover", objectPosition: "center 30%", opacity: i === bgIdx ? 1 : 0, transition: "opacity 1.2s ease" }}
+              priority={i === 0} />
+          ))}
         </div>
 
         <div className="hero-overlay" />
@@ -390,37 +433,38 @@ export default function Hero() {
 
             <div className={`hero-badge ${textVisible ? "vis" : ""}`}>
               <span className="hero-badge-live" />
-              <span className="hero-badge-text">Wave City&#39;s Premium Home Beauty Service</span>
+              <span className="hero-badge-text">{badge}</span>
             </div>
 
             <h1 className="hero-h1">
-              <span className={`hw hw0 ${textVisible ? "vis" : ""}`}>Luxury&nbsp;</span>
-              <span className={`hw hw1 ${textVisible ? "vis" : ""}`}>Salon</span>
+              <span className={`hw hw0 ${textVisible ? "vis" : ""}`}>{heading1}&nbsp;</span>
+              <span className={`hw hw1 ${textVisible ? "vis" : ""}`}>{heading2}</span>
               <br />
               <span className={`hw hw2 ${textVisible ? "vis" : ""}`}>
-                <span className="hero-gold-word">At Your Doorstep</span>
+                <span className="hero-gold-word">{headingGold}</span>
               </span>
             </h1>
 
             <p className={`hero-tag ${textVisible ? "vis" : ""}`}>
-              Professional beauty treatments delivered to your home — certified experts, premium products, guaranteed results.
+              {tagline}
             </p>
 
             <div className={`hero-ctas ${textVisible ? "vis" : ""}`}>
-              <a href="/book" className="cta-gold">Book Home Service →</a>
-              <a href="tel:+919625928495" className="cta-outline">📞 Call Now</a>
+              <a href={ctaHref} className="cta-gold" onClick={() => sessionStorage.setItem("bookingType", "home")}>{ctaLabel}</a>
+              <a href={secondaryHref} className="cta-outline">{secondaryLabel}</a>
+              <InquiryButton label="Ask a Question" />
             </div>
 
             <div className={`trust-row ${textVisible ? "vis" : ""}`}>
-              {["Certified Professionals", "100% Original Products", "On-time Guarantee", "No Hidden Charges"].map((t, i) => (
+              {trust.map((t, i) => (
                 <span key={i} className="trust-item"><span className="trust-dot" />{t}</span>
               ))}
             </div>
           </div>
 
           <div className={`stats-bar ${statsVisible ? "vis" : ""}`}>
-            {STATS.map((s, i) => (
-              <StatCounter key={i} raw={s.raw} suffix={s.suffix} label={s.label} started={statsVisible} />
+            {stats.map((st, i) => (
+              <StatCounter key={i} raw={st.raw} suffix={st.suffix} label={st.label} started={statsVisible} />
             ))}
           </div>
         </div>

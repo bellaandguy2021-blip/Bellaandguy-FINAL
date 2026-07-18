@@ -1,7 +1,8 @@
 "use client";
-import { useEffect, useRef } from "react";
+import { useEffect, useRef, useState } from "react";
+import { getTestimonials, DBTestimonial } from "@/lib/homepageContent";
 
-const reviews = [
+export const reviews = [
   {
     name: "Priya Sharma", rating: 5, date: "2 weeks ago", service: "Bridal Makeup", initials: "PS",
     text: "Absolutely flawless experience. The bridal makeup was exactly what I'd dreamed of — the team is incredibly professional and caring.",
@@ -30,6 +31,19 @@ const reviews = [
 
 export default function Reviews() {
   const sectionRef = useRef<HTMLElement>(null);
+  const [dbReviews, setDbReviews] = useState<DBTestimonial[]>([]);
+
+  useEffect(() => {
+    getTestimonials().then(setDbReviews);
+  }, []);
+
+  const cards = dbReviews.length > 0
+    ? dbReviews.map(r => ({
+        name: r.name, rating: r.rating, date: r.location ?? "", service: r.service ?? "",
+        initials: r.initials || r.name.split(" ").map(w => w[0]).join("").slice(0, 2).toUpperCase(),
+        text: r.review, photo: r.photo,
+      }))
+    : reviews;
 
   useEffect(() => {
     const observer = new IntersectionObserver(
@@ -38,7 +52,7 @@ export default function Reviews() {
     );
     sectionRef.current?.querySelectorAll(".reveal, .reveal-scale").forEach(el => observer.observe(el));
     return () => observer.disconnect();
-  }, []);
+  }, [cards.length]);
 
   return (
     <>
@@ -161,16 +175,18 @@ export default function Reviews() {
           </div>
 
           <div className="rv-grid">
-            {reviews.map((r, i) => (
+            {cards.map((r: any, i) => (
               <div key={i} className={`rv-card reveal-scale reveal-d${i + 1}`}>
                 <span className="rv-quote">"</span>
-                <span className="rv-service-tag">{r.service}</span>
+                {r.service && <span className="rv-service-tag">{r.service}</span>}
                 <div style={{ display: "flex", gap: "2px", marginBottom: "12px" }}>
                   {[...Array(r.rating)].map((_, j) => <span key={j} style={{ color: "#C9A84C", fontSize: "12px" }}>★</span>)}
                 </div>
                 <p className="rv-text">{r.text}</p>
                 <div className="rv-author">
-                  <div className="rv-avatar">{r.initials}</div>
+                  <div className="rv-avatar">
+                    {r.photo ? <img src={r.photo} alt="" style={{ width: "100%", height: "100%", borderRadius: "50%", objectFit: "cover" }} /> : r.initials}
+                  </div>
                   <div>
                     <div className="rv-name">{r.name}</div>
                     <div className="rv-date">{r.date}</div>

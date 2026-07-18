@@ -1,5 +1,6 @@
 "use client";
-import { useEffect, useRef } from "react";
+import { useEffect, useRef, useState } from "react";
+import { getHomepageFeatures, DBFeature } from "@/lib/homepageContent";
 
 const features = [
   {
@@ -66,6 +67,16 @@ const features = [
 
 export default function WhyChooseUs() {
   const sectionRef = useRef<HTMLElement>(null);
+  const [dbFeatures, setDbFeatures] = useState<DBFeature[]>([]);
+
+  useEffect(() => {
+    getHomepageFeatures().then(setDbFeatures);
+  }, []);
+
+  // Admin-managed cards (from the "Homepage" tab) take over entirely once any
+  // exist — same rule as the Services catalog: once managed, the admin's list
+  // is the source of truth. Until then, the hardcoded list above is shown.
+  const cards = dbFeatures.length > 0 ? dbFeatures : features;
 
   useEffect(() => {
     const observer = new IntersectionObserver(
@@ -74,7 +85,7 @@ export default function WhyChooseUs() {
     );
     sectionRef.current?.querySelectorAll(".reveal, .reveal-scale, .reveal-left, .reveal-right").forEach(el => observer.observe(el));
     return () => observer.disconnect();
-  }, []);
+  }, [cards.length]);
 
   return (
     <>
@@ -193,12 +204,12 @@ export default function WhyChooseUs() {
           </div>
 
           <div className="wcu-grid">
-            {features.map((f, i) => (
-              <div key={i} className={`wcu-card reveal-scale reveal-d${i + 1}`}>
-                <div className="wcu-icon-wrap">{f.svg}</div>
+            {cards.map((f: any, i) => (
+              <div key={f.id ?? i} className={`wcu-card reveal-scale reveal-d${i + 1}`}>
+                <div className="wcu-icon-wrap">{f.svg ?? <span style={{ fontSize: 22 }}>{f.icon}</span>}</div>
                 <h3 className="wcu-title">{f.title}</h3>
-                <p className="wcu-desc">{f.desc}</p>
-                <span className="wcu-badge">{f.badge}</span>
+                <p className="wcu-desc">{f.desc ?? f.description}</p>
+                {f.badge && <span className="wcu-badge">{f.badge}</span>}
               </div>
             ))}
           </div>

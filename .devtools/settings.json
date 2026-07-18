@@ -1,0 +1,13 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(curl -s http://localhost:3000)",
+      "PowerShell(cd \"c:\\\\Users\\\\offic\\\\Downloads\\\\bella-guy-salon-FIXED-v2\\\\bella-guy-salon-final\"; $job = Start-Job { cd \"c:\\\\Users\\\\offic\\\\Downloads\\\\bella-guy-salon-FIXED-v2\\\\bella-guy-salon-final\"; npm run dev 2>&1 }; Start-Sleep 20; Receive-Job $job | Select-Object -Last 10; Stop-Job $job; Remove-Job $job)",
+      "Bash(curl -s --max-time 5 http://localhost:3000)",
+      "PowerShell($r = Invoke-WebRequest -Uri \"http://localhost:3000\" -UseBasicParsing -TimeoutSec 10; $r.Content | Select-String -Pattern \"instagram|bellaandguy\" -AllMatches | ForEach-Object { $_.Matches } | ForEach-Object { $_.Value })",
+      "PowerShell(cd \"c:\\\\Users\\\\offic\\\\Downloads\\\\bella-guy-salon-FIXED-v2\\\\bella-guy-salon-final\"; $proc = Start-Process \"npm\" -ArgumentList \"run dev\" -PassThru -WindowStyle Hidden; Start-Sleep -Seconds 18; try { $r = Invoke-WebRequest -Uri \"http://localhost:3000\" -UseBasicParsing -TimeoutSec 8; \\($r.Content | Select-String \"instagram\" -AllMatches\\).Matches.Value } catch { \"Server not responding: $_\" } finally { $proc.Kill\\(\\) })",
+      "PowerShell(taskkill /F /IM node.exe 2>$null)",
+      "PowerShell(Invoke-WebRequest -Uri \"http://127.0.0.1:3000\" -TimeoutSec 10 -UseBasicParsing)"
+    ]
+  }
+}

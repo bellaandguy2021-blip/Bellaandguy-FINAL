@@ -1,14 +1,20 @@
 "use client";
 import { useState, useEffect } from "react";
+import { getPublicSettings } from "../lib/settings";
 
 export default function WhatsAppButton() {
   const [hover, setHover] = useState(false);
   const [visible, setVisible] = useState(false);
+  const [siteSettings, setSiteSettings] = useState<Record<string, string>>({});
 
   useEffect(() => {
     const timer = setTimeout(() => setVisible(true), 2000);
+    getPublicSettings().then(setSiteSettings);
     return () => clearTimeout(timer);
   }, []);
+
+  const waNumber  = (siteSettings.owner_whatsapp || "919625928495").replace(/\D/g, "");
+  const waMessage = siteSettings.whatsapp_message || "Hi! I'd like to book an appointment at Bella & Guy Salon.";
 
   return (
     <>
@@ -81,7 +87,7 @@ export default function WhatsAppButton() {
       <div className={`wa-entry ${visible ? "visible" : ""}`} style={{ position: "fixed", bottom: "32px", right: "32px", zIndex: 999 }}>
         <div className="wa-pulse" />
         <a
-          href="https://wa.me/919876543210?text=Hi! I'd like to book an appointment at Bella %26 Guy Salon."
+          href={`https://wa.me/${waNumber}?text=${encodeURIComponent(waMessage)}`}
           target="_blank" rel="noopener noreferrer"
           className={`wa-btn ${hover ? "hovered" : ""}`}
           onMouseEnter={() => setHover(true)}
