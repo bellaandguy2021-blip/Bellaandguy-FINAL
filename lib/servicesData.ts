@@ -199,9 +199,9 @@ export const allCategories: Category[] = [
   {
     id: "facial", label: "Facials", icon: "💆‍♀️", color: "#f9f0e0",
     imgsMale: [
-      "https://images.unsplash.com/photo-1712725213051-8d7d6a52edaf?auto=format&fit=crop&w=800&q=80",
-      "https://images.pexels.com/photos/7607292/pexels-photo-7607292.jpeg?auto=compress&cs=tinysrgb&w=800",
-      "https://images.pexels.com/photos/4599431/pexels-photo-4599431.jpeg?auto=compress&cs=tinysrgb&w=800",
+      "/images/men-facial-massage.jpg",
+      "/images/men-face-cleanup.jpg",
+      "/images/men-facial-mask.jpg",
     ],
     imgs: [
       "https://images.unsplash.com/photo-1570172619644-dfd03ed5d881?auto=format&fit=crop&w=800&q=80",

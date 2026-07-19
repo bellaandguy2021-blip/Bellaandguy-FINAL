@@ -1,6 +1,6 @@
 import { supabase } from "./supabase";
 import { uploadImage } from "./uploadImage";
-import { Category, ServiceItem } from "./servicesData";
+import { Category, ServiceItem, allCategories as staticCategories } from "./servicesData";
 
 export interface DBCategory {
   id: string;
@@ -11,6 +11,8 @@ export interface DBCategory {
   gender: "female" | "male" | "both";
   home_service: boolean;
   images: string[];
+  /** Photos shown in the Men section; falls back to `images` when empty. Missing (undefined) until supabase/services-v4.sql has been run. */
+  images_male?: string[];
   sort_order: number;
 }
 
@@ -81,6 +83,12 @@ export async function getDynamicCategories(): Promise<Category[]> {
           icon: cat.icon,
           color: cat.color,
           imgs: cat.images?.length ? cat.images : ["/images/interior1.jpg"],
+          // DB male photos when set; otherwise keep the static catalog's male
+          // set for imported categories (the DB row predates images_male, so
+          // an empty column must not wipe the site's Men-section photos).
+          imgsMale: cat.images_male?.length
+            ? cat.images_male
+            : staticCategories.find(sc => sc.id === cat.id)?.imgsMale,
           homeService: cat.home_service,
           gender: cat.gender,
           services: catServices,
