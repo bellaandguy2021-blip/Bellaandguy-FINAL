@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 
 const ACCESS_TOKEN    = process.env.WHATSAPP_ACCESS_TOKEN    ?? "";
 const PHONE_NUMBER_ID = process.env.WHATSAPP_PHONE_NUMBER_ID ?? "";
-const OWNER_PHONE     = process.env.OWNER_WHATSAPP_PHONE     ?? "919625928495";
+const OWNER_PHONE     = process.env.OWNER_WHATSAPP_PHONE     ?? "919999601212";
 const API_VERSION     = "v20.0";
 
 function fmt12h(t: string) {

@@ -178,7 +178,7 @@ export default function Services({ onServiceSelect, title, subtitle }: ServicesP
 
   function handleAddToCart(service: ServiceItem, cat: Category = selectedCat, image?: string) {
     if (!cat.homeService) {
-      window.location.href = "tel:+919625928495";
+      window.location.href = "tel:+919999601212";
       return;
     }
     const key = cartItemKey(cat.id, service.name, service.group);
@@ -200,7 +200,7 @@ export default function Services({ onServiceSelect, title, subtitle }: ServicesP
 
   function handleBookService(service: ServiceItem, cat: Category = selectedCat) {
     if (!cat.homeService) {
-      window.location.href = "tel:+919625928495";
+      window.location.href = "tel:+919999601212";
       return;
     }
     const key   = service.group ? `${service.group} – ${service.name}` : service.name;

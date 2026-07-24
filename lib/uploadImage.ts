@@ -1,4 +1,7 @@
-import { supabase } from "./supabase";
+// Uploads only happen from the admin/staff panel, whose login session lives in
+// the supabaseAdmin client (storageKey bg_admin_session). Using the default
+// client here sent uploads as anonymous → storage RLS rejected every upload.
+import { supabaseAdmin as supabase } from "./supabaseAdmin";
 
 const MAX_DIMENSION = 1600; // px — plenty for full-width hero/gallery use, keeps mobile downloads light
 const JPEG_QUALITY = 0.82;

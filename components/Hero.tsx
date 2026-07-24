@@ -72,7 +72,7 @@ export default function Hero() {
   const ctaLabel = s.hero_cta_label || "Book Home Service →";
   const ctaHref = s.hero_cta_href || "/book";
   const secondaryLabel = s.hero_secondary_label || "📞 Call Now";
-  const secondaryHref = s.hero_secondary_href || "tel:+919625928495";
+  const secondaryHref = s.hero_secondary_href || "tel:+919999601212";
   const bgImages = (() => {
     try {
       const parsed = JSON.parse(s.hero_bg_images || "[]");

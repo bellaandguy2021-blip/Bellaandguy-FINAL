@@ -8,7 +8,7 @@ export default function Footer() {
 
   const salonPhone = siteSettings.salon_phone || "+91 96259 28495";
   const salonPhoneHref = `tel:${salonPhone.replace(/[^\d+]/g, "")}`;
-  const waNumber = (siteSettings.owner_whatsapp || "919625928495").replace(/\D/g, "");
+  const waNumber = (siteSettings.owner_whatsapp || "919999601212").replace(/\D/g, "");
   const waMessage = siteSettings.whatsapp_message || "Hi! I'd like to book an appointment at Bella & Guy Salon.";
   const waHref = `https://wa.me/${waNumber}?text=${encodeURIComponent(waMessage)}`;
   const instagramUrl = siteSettings.instagram_url || "https://www.instagram.com/bellaandguy_";

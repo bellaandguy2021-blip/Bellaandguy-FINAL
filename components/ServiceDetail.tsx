@@ -138,7 +138,7 @@ export default function ServiceDetail({ category, service, gender }: ServiceDeta
         }
       `}</style>
 
-      <div className="sd-wrap">
+      <main id="main-content" className="sd-wrap">
         <div className="sd-hero">
           <div className="sd-hero-inner">
             <button className="sd-back" onClick={handleBack}><ArrowLeft size={13} /> Back</button>
@@ -340,7 +340,7 @@ export default function ServiceDetail({ category, service, gender }: ServiceDeta
             </button>
           </div>
         </div>
-      </div>
+      </main>
     </>
   );
 }

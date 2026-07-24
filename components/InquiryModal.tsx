@@ -277,7 +277,7 @@ export default function InquiryModal({ prefill, onClose }: InquiryModalProps) {
               </p>
               <div className="iq-confirm-btns">
                 <a className="iq-cbtn iq-cbtn-primary" href="/book">Book a Service</a>
-                <a className="iq-cbtn iq-cbtn-wa" href="https://wa.me/919625928495" target="_blank" rel="noopener noreferrer">
+                <a className="iq-cbtn iq-cbtn-wa" href="https://wa.me/919999601212" target="_blank" rel="noopener noreferrer">
                   <MessageCircle size={14} /> WhatsApp Support
                 </a>
                 <button className="iq-cbtn iq-cbtn-ghost" onClick={onClose}>Back to Home</button>

@@ -1235,7 +1235,7 @@ export default function BookPage() {
                   </div>
                   <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
                     <a
-                      href="tel:+919625928495"
+                      href="tel:+919999601212"
                       style={{
                         display: "inline-flex", alignItems: "center", gap: 6,
                         background: "#080808", color: "#E8C96D", borderRadius: 8, padding: "9px 14px",
@@ -1245,7 +1245,7 @@ export default function BookPage() {
                       <Phone size={12} /> Call Us
                     </a>
                     <a
-                      href={`https://wa.me/919625928495?text=${encodeURIComponent(
+                      href={`https://wa.me/919999601212?text=${encodeURIComponent(
                         `Hi! I'd like to check if home service is available at my location${pincode ? ` (pincode ${pincode})` : ""}.`
                       )}`}
                       target="_blank" rel="noopener noreferrer"
@@ -1466,7 +1466,7 @@ export default function BookPage() {
 
             <div style={{ display: "flex", gap: 10, padding: "0 24px 24px" }}>
               <a className="bk2-submit" style={{ flex: 1, textDecoration: "none", textAlign: "center", background: "linear-gradient(135deg,#25d366,#128c7e)", color: "#fff", display: "flex", alignItems: "center", justifyContent: "center", gap: 8 }}
-                href={`https://wa.me/919625928495?text=Hi%20Bella%20%26%20Guy!%20I%20just%20booked%20${encodeURIComponent(booked.service)}%20for%20${encodeURIComponent(formatDate(booked.bookingDate))}.%20Please%20confirm.`}
+                href={`https://wa.me/919999601212?text=Hi%20Bella%20%26%20Guy!%20I%20just%20booked%20${encodeURIComponent(booked.service)}%20for%20${encodeURIComponent(formatDate(booked.bookingDate))}.%20Please%20confirm.`}
                 target="_blank" rel="noopener noreferrer"
                 onClick={() => { setWaConfirmed(true); setCloseWarning(false); }}>
                 Confirm on WhatsApp

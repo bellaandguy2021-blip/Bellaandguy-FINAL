@@ -29,6 +29,8 @@ export interface DBGalleryImage {
   src: string;
   label: string | null;
   sub: string | null;
+  /** SEO alt text, editable in the admin panel (supabase/seo.sql adds the column). Falls back to `label` when empty. */
+  alt_text?: string | null;
   visible: boolean;
   sort_order: number;
 }

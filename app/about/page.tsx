@@ -1,4 +1,20 @@
-"use client";
+import type { Metadata } from "next";
+import JsonLd from "@/components/JsonLd";
+import { buildMetadata } from "@/lib/seo";
+import { webPageSchema, breadcrumbSchema } from "@/lib/schema";
+
+const ABOUT_TITLE = "About Us — Our Story, Promise & Terms";
+const ABOUT_DESCRIPTION =
+  "Founded in 2020, Bella & Guy Unisex Salon delivers premium beauty & grooming at affordable prices in Wave City, Ghaziabad — 100% genuine products, transparent service, and home beauty services you can trust.";
+
+export function generateMetadata(): Promise<Metadata> {
+  return buildMetadata({
+    path: "/about",
+    title: ABOUT_TITLE,
+    description: ABOUT_DESCRIPTION,
+    keywords: ["about Bella & Guy", "salon Wave City story", "salon terms and conditions"],
+  });
+}
 
 export default function AboutPage() {
   const terms = [
@@ -153,17 +169,22 @@ export default function AboutPage() {
         }
       `}</style>
 
-      <div className="ab-page">
+      <main id="main-content" className="ab-page">
+        <JsonLd data={[
+          webPageSchema({ path: "/about", title: ABOUT_TITLE, description: ABOUT_DESCRIPTION }),
+          breadcrumbSchema([{ name: "Home", path: "/" }, { name: "About Us", path: "/about" }]),
+        ]} />
         {/* Header */}
-        <div className="ab-header">
+        <header className="ab-header">
           <div className="ab-brand">Bella &amp; Guy · Home Beauty Service</div>
           <h1 className="ab-title">About <span>Us</span></h1>
           <p className="ab-subtitle">Home Salon Services · Wave City, Ghaziabad</p>
-        </div>
+        </header>
 
         {/* Body */}
         <div className="ab-body">
-          <div className="ab-section-label">Our Story</div>
+          <section aria-labelledby="our-story">
+            <h2 id="our-story" className="ab-section-label">Our Story</h2>
 
           <p className="ab-prose">
             Founded in <strong>2020</strong>, <strong>Bella &amp; Guy Unisex Salon</strong> was created with a vision
@@ -193,12 +214,13 @@ export default function AboutPage() {
             <div className="ab-promise-label">Our Promise</div>
             <div className="ab-promise-text">Luxury. Authenticity. Affordability.<br />Trusted by every client, every visit.</div>
           </div>
+          </section>
 
           <div className="ab-divider" />
 
           {/* Terms & Conditions */}
-          <div id="terms">
-            <div className="ab-section-label">Terms &amp; Conditions</div>
+          <section id="terms" aria-labelledby="terms-heading">
+            <h2 id="terms-heading" className="ab-section-label">Terms &amp; Conditions</h2>
 
             <div className="ab-list">
               {terms.map((term, i) => (
@@ -211,16 +233,16 @@ export default function AboutPage() {
 
             <div className="ab-footer-note">
               For any questions or concerns, contact us on WhatsApp at{" "}
-              <a href="https://wa.me/919625928495" style={{ color: "#C9A84C", fontWeight: 600, textDecoration: "none" }}>
+              <a href="https://wa.me/919999601212" style={{ color: "#C9A84C", fontWeight: 600, textDecoration: "none" }}>
                 +91 96259 28495
               </a>
               {" "}· Mon–Sun, 9:00 AM – 8:00 PM
             </div>
-          </div>
+          </section>
 
           <a href="/" className="ab-back">← Back to Home</a>
         </div>
-      </div>
+      </main>
     </>
   );
 }

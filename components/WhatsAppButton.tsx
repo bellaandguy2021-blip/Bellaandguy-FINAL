@@ -13,7 +13,7 @@ export default function WhatsAppButton() {
     return () => clearTimeout(timer);
   }, []);
 
-  const waNumber  = (siteSettings.owner_whatsapp || "919625928495").replace(/\D/g, "");
+  const waNumber  = (siteSettings.owner_whatsapp || "919999601212").replace(/\D/g, "");
   const waMessage = siteSettings.whatsapp_message || "Hi! I'd like to book an appointment at Bella & Guy Salon.";
 
   return (

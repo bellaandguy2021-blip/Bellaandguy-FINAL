@@ -59,7 +59,7 @@ export default function MyBookings() {
 
   const salonPhone = siteSettings.salon_phone || "+91 96259 28495";
   const salonPhoneDigits = salonPhone.replace(/[^\d+]/g, "");
-  const waNumber = (siteSettings.owner_whatsapp || "919625928495").replace(/\D/g, "");
+  const waNumber = (siteSettings.owner_whatsapp || "919999601212").replace(/\D/g, "");
   const [bookings, setBookings] = useState<Booking[]>([]);
   const [loading, setLoading] = useState(true);
   const [userName, setUserName] = useState("");

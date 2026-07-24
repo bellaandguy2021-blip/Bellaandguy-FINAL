@@ -42,7 +42,7 @@ export const slides = [
   },
 ];
 
-type Slide = { src: string; fallback: string; label: string; sub: string };
+type Slide = { src: string; fallback: string; label: string; sub: string; alt?: string };
 
 const INTERVAL = 4200;
 // Photos at least this much wider than tall get their own full-width slide —
@@ -87,7 +87,7 @@ export default function Gallery() {
   // Admin-managed photos (from the "Homepage" tab) take over entirely once any
   // exist, same rule as the rest of the homepage manager content.
   const rawItems: Slide[] = dbImages.length > 0
-    ? dbImages.map(g => ({ src: g.src, fallback: g.src, label: g.label ?? "", sub: g.sub ?? "" }))
+    ? dbImages.map(g => ({ src: g.src, fallback: g.src, label: g.label ?? "", sub: g.sub ?? "", alt: g.alt_text ?? undefined }))
     : slides;
   const itemsKey = rawItems.map(i => i.src).join("|");
   // Stable reference across renders (changes only when the actual photo list
@@ -376,7 +376,7 @@ export default function Gallery() {
                   <div key={`${i}-${gi}`} className="gl-slide-cell">
                     <Image
                       src={srcFor(slide)}
-                      alt={slide.label}
+                      alt={slide.alt || slide.label || "Bella & Guy Salon"}
                       fill
                       className="gl-img"
                       priority={i === 0 && gi === 0}
@@ -394,7 +394,7 @@ export default function Gallery() {
                 </div>
                 <div className="gl-dots">
                   {groups.map((_, d) => (
-                    <button key={d} className={`gl-dot ${d === current ? "on" : ""}`} onClick={() => goTo(d)} />
+                    <button key={d} aria-label={`Go to slide ${d + 1}`} className={`gl-dot ${d === current ? "on" : ""}`} onClick={() => goTo(d)} />
                   ))}
                 </div>
               </div>
@@ -408,15 +408,15 @@ export default function Gallery() {
           <div className="gl-counter"><span>{current + 1}</span> / {groups.length}</div>
 
           {/* Arrows */}
-          <button className="gl-arrow gl-prev" onClick={e => { e.stopPropagation(); prev_(); }}>‹</button>
-          <button className="gl-arrow gl-next" onClick={e => { e.stopPropagation(); next(); }}>›</button>
+          <button className="gl-arrow gl-prev" aria-label="Previous photo" onClick={e => { e.stopPropagation(); prev_(); }}>‹</button>
+          <button className="gl-arrow gl-next" aria-label="Next photo" onClick={e => { e.stopPropagation(); next(); }}>›</button>
         </div>
 
         {/* Thumbnail strip */}
         <div className="gl-thumbs">
           {groups.map((group, i) => (
             <div key={`thumb-${i}`} className={`gl-thumb ${i === current ? "on" : ""}`} onClick={() => goTo(i)}>
-              <Image src={srcFor(group[0])} alt={group[0].label} fill style={{ objectFit: "cover" }} onError={() => handleImgError(group[0])} />
+              <Image src={srcFor(group[0])} alt={group[0].alt || group[0].label || "Bella & Guy Salon"} fill style={{ objectFit: "cover" }} onError={() => handleImgError(group[0])} />
               <div className="gl-thumb-overlay" />
               <div className="gl-thumb-bar" />
             </div>

@@ -1,6 +1,7 @@
 "use client";
 
 import React, { useEffect, useState, useMemo, useRef } from "react";
+import dynamic from "next/dynamic";
 import jsPDF from "jspdf";
 import autoTable from "jspdf-autotable";
 import { useRouter } from "next/navigation";
@@ -14,6 +15,11 @@ import {
 import { reviews as staticReviews } from "../../components/Reviews";
 import { slides as staticGallerySlides } from "../../components/Gallery";
 import { faqs as staticFaqs } from "../../components/Faq";
+
+// SEO Manager is its own chunk — only loads when the SEO tab is opened.
+const SeoManager = dynamic(() => import("../../components/admin/SeoManager"), {
+  loading: () => <div style={{ color: "#666", fontSize: 13, padding: 30 }}>Loading SEO Manager…</div>,
+});
 
 import {
   BarChart, Bar, LineChart, Line, XAxis, YAxis, Tooltip,
@@ -33,7 +39,7 @@ import {
 } from "lucide-react";
 
 // ── Types ──────────────────────────────────────────────
-type Tab = "dashboard" | "bookings" | "revenue" | "staff" | "contacts" | "inquiries" | "customers" | "services" | "homepage" | "settings" | "backup" | "logs";
+type Tab = "dashboard" | "bookings" | "revenue" | "staff" | "contacts" | "inquiries" | "customers" | "services" | "homepage" | "seo" | "settings" | "backup" | "logs";
 type ConfirmModal = { title: string; message: string; onConfirm: () => void; confirmLabel?: string; icon?: React.ReactNode; danger?: boolean } | null;
 type FilterType = "all" | "today" | "week" | "month";
 type TypeFilter = "all" | "salon" | "home";
@@ -139,7 +145,7 @@ const SETTING_GROUPS: { title: string; icon: any; keys: { key: string; label: st
       { key: "hero_cta_label",       label: "Main Button Text",        placeholder: "Book Home Service →" },
       { key: "hero_cta_href",        label: "Main Button Link",        placeholder: "/book" },
       { key: "hero_secondary_label", label: "Second Button Text",      placeholder: "📞 Call Now" },
-      { key: "hero_secondary_href",  label: "Second Button Link",      placeholder: "tel:+919625928495" },
+      { key: "hero_secondary_href",  label: "Second Button Link",      placeholder: "tel:+919999601212" },
       { key: "hero_bg_image",        label: "Background Image URL",    placeholder: "/images/salon-front.jpg" },
     ],
   },
@@ -615,6 +621,14 @@ export default function AdminPage() {
   const [svcSaving, setSvcSaving]           = useState(false);
   const [svcUploading, setSvcUploading]     = useState(false);
   const [svcError, setSvcError]             = useState("");
+
+  // Supabase writes fail with a cryptic RLS message when the auth session has
+  // silently expired (the bg_role cookie outlives the Supabase JWT, so the
+  // panel still opens but every insert/update runs as anonymous). Translate it.
+  const friendlyDbError = (msg: string) =>
+    /row-level security/i.test(msg)
+      ? "Your login session has expired — please Logout and log in again, then retry. (Technical: " + msg + ")"
+      : msg;
   const [svcSearch, setSvcSearch]           = useState("");
   const [svcImporting, setSvcImporting]     = useState(false);
   const [svcImportMsg, setSvcImportMsg]     = useState("");
@@ -654,7 +668,7 @@ export default function AdminPage() {
           images: svcCatForm.images ?? [],
         }).eq("id", svcCatForm.id);
     setSvcSaving(false);
-    if (error) { setSvcError(error.message); return; }
+    if (error) { setSvcError(friendlyDbError(error.message)); return; }
     await loadCatalogRaw();
     refreshCatalog();
     setSvcActiveCatId(svcCatForm.id!);
@@ -703,7 +717,7 @@ export default function AdminPage() {
       ? await supabase.from("services").update(payload).eq("id", svcForm.id)
       : await supabase.from("services").insert(payload);
     setSvcSaving(false);
-    if (error) { setSvcError(error.message); return; }
+    if (error) { setSvcError(friendlyDbError(error.message)); return; }
     await loadCatalogRaw();
     refreshCatalog();
     // Jump to whichever category the service now belongs to, so an edit that
@@ -759,7 +773,7 @@ export default function AdminPage() {
       reordered.map((r, i) => r.sort_order === i ? null : supabase.from(table).update({ sort_order: i }).eq("id", r.id))
     );
     const failed = results.find(r => r?.error);
-    if (failed?.error) { setSvcError(failed.error.message); return; }
+    if (failed?.error) { setSvcError(friendlyDbError(failed.error.message)); return; }
     await loadCatalogRaw();
     refreshCatalog();
   }
@@ -783,7 +797,7 @@ export default function AdminPage() {
         setSvcForm(f => f ? { ...f, images: [...(f.images ?? []), ...urls] } : f);
       }
     } catch (err: any) {
-      setSvcError(err.message || "Image upload failed.");
+      setSvcError(friendlyDbError(err.message || "Image upload failed."));
     } finally {
       setSvcUploading(false);
     }
@@ -805,7 +819,7 @@ export default function AdminPage() {
         id: cat.id, label: cat.label, description: cat.desc, icon: cat.icon, color: cat.color,
         gender: cat.gender, home_service: cat.homeService, images: cat.imgs ?? [],
       });
-      if (catErr) { setSvcError(`Failed on "${cat.label}": ${catErr.message}`); break; }
+      if (catErr) { setSvcError(friendlyDbError(catErr.message)); break; }
       catCount++;
       const rows = cat.services.map(s => ({
         category_id: cat.id, name: s.name, price: s.price, duration: s.duration ?? null,
@@ -1813,6 +1827,7 @@ export default function AdminPage() {
     ["customers", <UserCheck size={16} />,       "Customers", 0],
     ["services",  <Scissors size={16} />,        "Services", 0],
     ["homepage",  <Home size={16} />,            "Homepage", 0],
+    ["seo",       <Search size={16} />,           "SEO", 0],
     ["settings",  <SettingsIcon size={16} />,    "Settings", 0],
     ["backup",    <Database size={16} />,         "Backup", 0],
     ["logs",      <Activity size={16} />,         "Activity", activityLogs.length],
@@ -1873,7 +1888,7 @@ export default function AdminPage() {
             <button className="mob-menu-btn" onClick={() => setSidebarOpen(true)}><Menu size={18}/></button>
             <div style={{ flex: 1 }}>
               <div className="tb-title">
-                { activeTab === "dashboard" ? "Dashboard" : activeTab === "bookings" ? "Appointments" : activeTab === "revenue" ? "Revenue Analytics" : activeTab === "staff" ? "Staff Management" : activeTab === "contacts" ? "Messages" : activeTab === "inquiries" ? "Inquiries" : activeTab === "customers" ? "Customers" : activeTab === "services" ? "Services" : activeTab === "homepage" ? "Homepage" : activeTab === "settings" ? "Settings" : activeTab === "backup" ? "Backup" : "Activity Log" }
+                { activeTab === "dashboard" ? "Dashboard" : activeTab === "bookings" ? "Appointments" : activeTab === "revenue" ? "Revenue Analytics" : activeTab === "staff" ? "Staff Management" : activeTab === "contacts" ? "Messages" : activeTab === "inquiries" ? "Inquiries" : activeTab === "customers" ? "Customers" : activeTab === "services" ? "Services" : activeTab === "homepage" ? "Homepage" : activeTab === "seo" ? "SEO Manager" : activeTab === "settings" ? "Settings" : activeTab === "backup" ? "Backup" : "Activity Log" }
               </div>
               <div className="tb-sub">
                 {new Date().toLocaleDateString("en-IN", { weekday: "long", year: "numeric", month: "long", day: "numeric" })}
@@ -3412,6 +3427,9 @@ export default function AdminPage() {
             )}
 
             {/* ── SETTINGS TAB ── */}
+            {/* ── SEO TAB ── */}
+            {activeTab === "seo" && <SeoManager notify={notify} />}
+
             {activeTab === "settings" && (
               <div style={{ maxWidth: 640, display: "flex", flexDirection: "column", gap: 16 }}>
                 {settingsError && (

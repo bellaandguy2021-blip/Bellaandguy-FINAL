@@ -3,6 +3,9 @@ import { notFound } from "next/navigation";
 import { findServiceBySlug, slugifyService } from "@/lib/servicesData";
 import { getDynamicCategories } from "@/lib/dynamicServices";
 import ServiceDetail from "@/components/ServiceDetail";
+import JsonLd from "@/components/JsonLd";
+import { buildMetadata } from "@/lib/seo";
+import { serviceSchema, breadcrumbSchema, faqSchema, webPageSchema } from "@/lib/schema";
 
 interface PageParams {
   categoryId: string;
@@ -32,11 +35,27 @@ export async function generateMetadata({
 }): Promise<Metadata> {
   const { categoryId, slug } = await params;
   const found = await findService(categoryId, slug);
-  if (!found) return { title: "Service Not Found | Bella & Guy" };
-  return {
-    title: `${found.service.name} | Bella & Guy Salon`,
-    description: found.service.desc ?? found.category.desc,
-  };
+  if (!found) {
+    return { title: "Service Not Found | Bella & Guy Salon", robots: { index: false, follow: false } };
+  }
+
+  const { category, service } = found;
+  const price = service.discountPercent
+    ? Math.round(service.price * (1 - service.discountPercent / 100))
+    : service.price;
+  const description = (
+    service.desc
+      ? `${service.name} in Wave City, Ghaziabad — ${service.desc.replace(/\s*·\s*/g, ", ")}. ₹${price}${service.duration ? `, ${service.duration}` : ""}. Book at the salon or at home.`
+      : `${service.name} (${category.label}) in Wave City, Ghaziabad from ₹${price}${service.duration ? `, ${service.duration}` : ""}. ${category.desc}. Book at the salon or at home.`
+  ).slice(0, 300);
+
+  return buildMetadata({
+    path: `/services/${categoryId}/${slug}`,
+    title: `${service.name} — ${category.label}`,
+    description,
+    ogImage: service.gallery?.[0] ?? category.imgs[0],
+    keywords: [service.name, category.label, `${category.label} Ghaziabad`, `${service.name} Wave City`],
+  });
 }
 
 export default async function ServicePage({
@@ -52,6 +71,26 @@ export default async function ServicePage({
   if (!found) notFound();
 
   const gender: "female" | "male" = genderParam === "male" ? "male" : "female";
+  const { category, service } = found;
+  const path = `/services/${categoryId}/${slug}`;
 
-  return <ServiceDetail category={found.category} service={found.service} gender={gender} />;
+  // Service + category FAQs render on the page — mirror them in FAQ schema.
+  const faqs = [...(service.faqs ?? []), ...(category.faqs ?? [])];
+
+  return (
+    <>
+      <JsonLd data={[
+        webPageSchema({ path, title: `${service.name} — ${category.label}`, description: service.desc ?? category.desc }),
+        serviceSchema(category, service),
+        breadcrumbSchema([
+          { name: "Home", path: "/" },
+          { name: "Services", path: "/#services" },
+          { name: category.label, path: `/#services` },
+          { name: service.name, path },
+        ]),
+        faqSchema(faqs),
+      ]} />
+      <ServiceDetail category={category} service={service} gender={gender} />
+    </>
+  );
 }

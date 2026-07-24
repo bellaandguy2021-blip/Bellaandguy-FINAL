@@ -15,6 +15,15 @@
   --cream-deep: #F2EDE3;
 }
 
+/* ── Accessibility: skip-to-content link (visible only on keyboard focus) ── */
+.skip-link {
+  position: absolute; left: -9999px; top: 0; z-index: 10000;
+  background: var(--black); color: var(--gold-light);
+  padding: 12px 20px; border-radius: 0 0 10px 0;
+  font-size: 13px; font-weight: 700; text-decoration: none;
+}
+.skip-link:focus { left: 0; }
+
 /* ── InquiryButton (Ask About This Service / Make an Inquiry) ── */
 .iqb-outline {
   display: inline-flex; align-items: center; gap: 7px;
