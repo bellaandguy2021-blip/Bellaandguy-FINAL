@@ -5,7 +5,7 @@ import { webPageSchema, breadcrumbSchema } from "@/lib/schema";
 
 const BOOK_TITLE = "Book an Appointment — Salon & Home Beauty Services";
 const BOOK_DESCRIPTION =
-  "Book your salon or home beauty appointment in Wave City, Ghaziabad. Facials, waxing, hair spa, hair color, manicure, men's grooming & more — choose your service, date and time in minutes.";
+  "Book your salon or home beauty appointment in Wave City, Ghaziabad — facials, waxing, hair color, manicure & grooming. Pick your service, date & time.";
 
 export function generateMetadata(): Promise<Metadata> {
   return buildMetadata({

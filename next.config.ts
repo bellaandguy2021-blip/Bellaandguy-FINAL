@@ -11,15 +11,15 @@ const nextConfig: NextConfig = {
     remotePatterns: [
       { protocol: "https", hostname: "images.unsplash.com" },
       { protocol: "https", hostname: "images.pexels.com" },
-      // Next's built-in image optimizer proxy rejects fetching Supabase Storage
-      // URLs in some network environments (DNS resolves to an address its SSRF
-      // guard treats as private, so /_next/image 400s even though the URL loads
-      // fine directly). unoptimized:true skips that proxy for ALL images — the
-      // browser fetches originals directly instead, trading automatic
-      // resize/format-conversion for guaranteed loading.
       { protocol: "https", hostname: "*.supabase.co" },
     ],
-    unoptimized: true,
+    // Local /public images (logo, team photos, category art) are optimized
+    // normally — resized, converted to AVIF/WebP, lazy-loaded. Remote URLs
+    // (admin-uploaded hero/gallery images on Supabase Storage) opt out of the
+    // optimizer per-instance via lib/image.ts's isUnoptimizableSrc(), since
+    // its fetch proxy rejects some of those hosts in certain network
+    // environments (SSRF guard false-positive) even though the URL loads fine
+    // directly in the browser.
   },
   async headers() {
     // CSP kept in Report-Only-free enforcing mode but deliberately permissive on

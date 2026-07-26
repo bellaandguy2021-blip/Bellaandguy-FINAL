@@ -5,7 +5,7 @@ import { webPageSchema, breadcrumbSchema } from "@/lib/schema";
 
 const ABOUT_TITLE = "About Us — Our Story, Promise & Terms";
 const ABOUT_DESCRIPTION =
-  "Founded in 2020, Bella & Guy Unisex Salon delivers premium beauty & grooming at affordable prices in Wave City, Ghaziabad — 100% genuine products, transparent service, and home beauty services you can trust.";
+  "Founded in 2020, Bella & Guy Unisex Salon offers premium beauty & grooming at honest prices in Wave City, Ghaziabad — 100% genuine, home service available.";
 
 export function generateMetadata(): Promise<Metadata> {
   return buildMetadata({

@@ -28,7 +28,7 @@ export async function generateMetadata(): Promise<Metadata> {
   return {
     metadataBase: new URL(SITE_URL),
     title: {
-      default: `${siteName} | Premium Unisex Salon & Home Beauty Service — Wave City, Ghaziabad`,
+      default: `${siteName} | Unisex Salon in Wave City, Ghaziabad`,
       template: `%s | ${siteName}`,
     },
     description:

@@ -54,9 +54,9 @@ const features = [
     ),
   },
   {
-    title: "4.9★ Google Rated",
-    desc: "Consistently rated 4.9 stars across 2,000+ verified Google reviews. Our reputation speaks for itself.",
-    badge: "2000+ reviews",
+    title: "4.6★ Google Rated",
+    desc: "Consistently rated 4.6 stars by our clients. Our reputation speaks for itself.",
+    badge: "Highly rated",
     svg: (
       <svg width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="#C9A84C" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round">
         <polygon points="12,2 15.09,8.26 22,9.27 17,14.14 18.18,21.02 12,17.77 5.82,21.02 7,14.14 2,9.27 8.91,8.26"/>

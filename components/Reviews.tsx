@@ -166,11 +166,10 @@ export default function Reviews() {
             </h2>
             <div style={{ width: "40px", height: "1px", background: "linear-gradient(90deg,transparent,#C9A84C,transparent)", margin: "0 auto 20px" }} />
             <div className="rv-rating-row reveal">
-              <span className="rv-big-num">4.9</span>
+              <span className="rv-big-num">4.6</span>
               <div>
                 <div className="rv-stars">★★★★★</div>
               </div>
-              <span className="rv-count">Based on 2,000+ Google reviews</span>
             </div>
           </div>
 

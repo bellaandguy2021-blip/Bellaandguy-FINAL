@@ -3,6 +3,7 @@ import Image from "next/image";
 import { useEffect, useRef, useState } from "react";
 import InquiryButton from "./InquiryButton";
 import { getPublicSettings } from "@/lib/settings";
+import { isUnoptimizableSrc } from "@/lib/image";
 
 const DEFAULT_STATS = [
   { raw: 5000, suffix: "+", label: "Happy Clients" },
@@ -70,9 +71,10 @@ export default function Hero() {
   const headingGold = s.hero_heading_gold || "At Your Doorstep";
   const tagline = s.hero_tagline || "Professional beauty services, delivered to the comfort of your home.";
   const ctaLabel = s.hero_cta_label || "Book Home Service →";
-  const ctaHref = s.hero_cta_href || "/book";
-  const secondaryLabel = s.hero_secondary_label || "📞 Call Now";
-  const secondaryHref = s.hero_secondary_href || "tel:+919999601212";
+  // Scrolls to the Services section (in-page) rather than jumping straight to
+  // /book — visitors pick services into the cart first, then checkout carries
+  // that selection into the booking flow (skipping gender/category/service steps).
+  const secondaryLabel = s.hero_secondary_label || "Contact Us";
   const bgImages = (() => {
     try {
       const parsed = JSON.parse(s.hero_bg_images || "[]");
@@ -400,9 +402,9 @@ export default function Hero() {
         {/* Background with parallax */}
         <div ref={bgRef} className="hero-bg-wrap">
           {bgImages.map((src, i) => (
-            <Image key={src} src={src} alt="Bella & Guy Salon" fill
+            <Image key={src} src={src} alt="Bella & Guy Salon" fill sizes="100vw"
               style={{ objectFit: "cover", objectPosition: "center 30%", opacity: i === bgIdx ? 1 : 0, transition: "opacity 1.2s ease" }}
-              priority={i === 0} />
+              priority={i === 0} unoptimized={isUnoptimizableSrc(src)} />
           ))}
         </div>
 
@@ -450,8 +452,8 @@ export default function Hero() {
             </p>
 
             <div className={`hero-ctas ${textVisible ? "vis" : ""}`}>
-              <a href={ctaHref} className="cta-gold" onClick={() => sessionStorage.setItem("bookingType", "home")}>{ctaLabel}</a>
-              <a href={secondaryHref} className="cta-outline">{secondaryLabel}</a>
+              <a href="#services" className="cta-gold">{ctaLabel}</a>
+              <a href="#contact" className="cta-outline">{secondaryLabel}</a>
               <InquiryButton label="Ask a Question" />
             </div>
 

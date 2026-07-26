@@ -2,6 +2,7 @@
 import Image from "next/image";
 import { useState, useEffect, useRef, useCallback, useMemo } from "react";
 import { getGalleryImages, DBGalleryImage } from "@/lib/homepageContent";
+import { isUnoptimizableSrc } from "@/lib/image";
 
 export const slides = [
   {
@@ -378,8 +379,10 @@ export default function Gallery() {
                       src={srcFor(slide)}
                       alt={slide.alt || slide.label || "Bella & Guy Salon"}
                       fill
+                      sizes="(max-width: 900px) 100vw, 1200px"
                       className="gl-img"
                       priority={i === 0 && gi === 0}
+                      unoptimized={isUnoptimizableSrc(srcFor(slide))}
                       onError={() => handleImgError(slide)}
                     />
                   </div>
@@ -416,7 +419,7 @@ export default function Gallery() {
         <div className="gl-thumbs">
           {groups.map((group, i) => (
             <div key={`thumb-${i}`} className={`gl-thumb ${i === current ? "on" : ""}`} onClick={() => goTo(i)}>
-              <Image src={srcFor(group[0])} alt={group[0].alt || group[0].label || "Bella & Guy Salon"} fill style={{ objectFit: "cover" }} onError={() => handleImgError(group[0])} />
+              <Image src={srcFor(group[0])} alt={group[0].alt || group[0].label || "Bella & Guy Salon"} fill sizes="200px" style={{ objectFit: "cover" }} unoptimized={isUnoptimizableSrc(srcFor(group[0]))} onError={() => handleImgError(group[0])} />
               <div className="gl-thumb-overlay" />
               <div className="gl-thumb-bar" />
             </div>

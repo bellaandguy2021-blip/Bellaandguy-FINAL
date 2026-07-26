@@ -131,6 +131,8 @@ const SETTING_GROUPS: { title: string; icon: any; keys: { key: string; label: st
       { key: "instagram_url",      label: "Instagram Profile URL", placeholder: "https://www.instagram.com/bellaandguy_" },
       { key: "min_booking_value",  label: "Minimum Home Service Booking Value (₹)", placeholder: "1100" },
       { key: "max_bookings_per_slot", label: "Max Bookings Per Time Slot", placeholder: "3 (how many customers can book the same 30-min slot before it's shown as full)" },
+      { key: "booking_start_hour", label: "Booking Slots — Start Hour (24h, e.g. 10 = 10 AM)", placeholder: "10" },
+      { key: "booking_end_hour",   label: "Booking Slots — End Hour (24h, e.g. 19 = 7 PM)",    placeholder: "19" },
     ],
   },
   {

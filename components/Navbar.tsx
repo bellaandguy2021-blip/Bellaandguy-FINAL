@@ -304,7 +304,7 @@ export default function Navbar() {
                   {link.label}
                 </a>
               ))}
-              <a href="/book" className="nav-book-btn">Book Now</a>
+              <a href="/#services" className="nav-book-btn">Book Now</a>
 
               {customerLoggedIn ? (
                 <div ref={profileRef} style={{ position: "relative" }}>
@@ -416,7 +416,7 @@ export default function Navbar() {
               ) : (
                 <a href="/customer-login" className="mobile-nav-link" onClick={() => setMenuOpen(false)}>Login</a>
               )}
-              <a href="/book" onClick={() => setMenuOpen(false)} style={{
+              <a href="/#services" onClick={() => setMenuOpen(false)} style={{
                 display: "inline-block", marginTop: "20px",
                 background: "linear-gradient(135deg, #E8C96D, #C9A84C)",
                 color: "#0A0A0A", padding: "13px 32px", borderRadius: "4px",

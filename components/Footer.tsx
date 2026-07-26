@@ -19,7 +19,7 @@ export default function Footer() {
     { label: "Services", href: "#services" },
     { label: "Home Service", href: "#services" },
     { label: "Gallery", href: "#gallery" },
-    { label: "Book Appointment", href: "/book" },
+    { label: "Book Appointment", href: "/#services" },
     { label: "Contact", href: "#contact" },
     { label: "About Us", href: "/about" },
   ];
@@ -218,8 +218,7 @@ export default function Footer() {
           <div>
             <div className="footer-col-title">Quick Links</div>
             {links.filter(l => l.label !== "Home Service").map((l, i) => (
-              <a key={i} href={l.href} className="footer-link"
-                onClick={() => { if (l.label === "Book Appointment") sessionStorage.setItem("bookingType", "home"); }}>
+              <a key={i} href={l.href} className="footer-link">
                 {l.label === "Book Appointment" ? "Book Home Service" : l.label}
               </a>
             ))}
@@ -230,7 +229,7 @@ export default function Footer() {
             <span className="footer-contact-item">{siteSettings.salon_address || "Wave City, Ghaziabad, UP 201003"}</span>
             <a href={salonPhoneHref} className="footer-contact-item">{salonPhone}</a>
             <span className="footer-contact-item">{siteSettings.salon_hours || "Mon – Sun, 9:00 AM – 8:00 PM"}</span>
-            <a href="/book" className="footer-book-btn" onClick={() => sessionStorage.setItem("bookingType", "home")}>
+            <a href="/#services" className="footer-book-btn">
               Book Home Service →
             </a>
           </div>

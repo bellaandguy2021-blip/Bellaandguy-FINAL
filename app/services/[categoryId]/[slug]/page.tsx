@@ -47,7 +47,7 @@ export async function generateMetadata({
     service.desc
       ? `${service.name} in Wave City, Ghaziabad — ${service.desc.replace(/\s*·\s*/g, ", ")}. ₹${price}${service.duration ? `, ${service.duration}` : ""}. Book at the salon or at home.`
       : `${service.name} (${category.label}) in Wave City, Ghaziabad from ₹${price}${service.duration ? `, ${service.duration}` : ""}. ${category.desc}. Book at the salon or at home.`
-  ).slice(0, 300);
+  ).slice(0, 155);
 
   return buildMetadata({
     path: `/services/${categoryId}/${slug}`,

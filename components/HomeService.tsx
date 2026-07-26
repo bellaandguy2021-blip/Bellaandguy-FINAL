@@ -263,14 +263,7 @@ export default function HomeService() {
                   </div>
                 ))}
               </div>
-              <a
-                href="/book"
-                className="hs-book-btn"
-                onClick={() => {
-                  sessionStorage.setItem("bookingType", "home");
-                  window.dispatchEvent(new CustomEvent("select-booking-type", { detail: "home" }));
-                }}
-              >
+              <a href="#services" className="hs-book-btn">
                 Book Home Service →
               </a>
             </div>

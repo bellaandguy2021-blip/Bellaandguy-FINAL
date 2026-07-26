@@ -1,5 +1,5 @@
 "use client";
-import { useState, useEffect, useRef } from "react";
+import { useState, useEffect, useRef, useMemo } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import { supabase } from "../../lib/supabase";
 import { allCategories as staticCategories, Category } from "../../lib/servicesData";
@@ -18,17 +18,25 @@ import { useCart } from "@/components/CartProvider";
 import { distanceKm, SERVICE_RADIUS_KM } from "@/lib/geo";
 
 /* ── Time slots ────────────────────────────────────────────── */
-const TIME_SLOTS = Array.from({ length: 23 }, (_, i) => {
-  const totalMins = 9 * 60 + i * 30;
-  const h = Math.floor(totalMins / 60);
-  const m = totalMins % 60;
-  const ampm = h >= 12 ? "PM" : "AM";
-  const h12 = h % 12 || 12;
-  return {
-    label: `${h12}:${m.toString().padStart(2, "0")} ${ampm}`,
-    value: `${h.toString().padStart(2, "0")}:${m.toString().padStart(2, "0")}`,
-  };
-});
+// Default window is 10 AM – 7 PM; admin-editable via Settings → Advanced
+// Settings ("Booking Slots Start/End Hour").
+const DEFAULT_BOOKING_START_HOUR = 10;
+const DEFAULT_BOOKING_END_HOUR = 19;
+
+function buildTimeSlots(startHour: number, endHour: number) {
+  const slots = [];
+  for (let totalMins = startHour * 60; totalMins <= endHour * 60; totalMins += 30) {
+    const h = Math.floor(totalMins / 60);
+    const m = totalMins % 60;
+    const ampm = h >= 12 ? "PM" : "AM";
+    const h12 = h % 12 || 12;
+    slots.push({
+      label: `${h12}:${m.toString().padStart(2, "0")} ${ampm}`,
+      value: `${h.toString().padStart(2, "0")}:${m.toString().padStart(2, "0")}`,
+    });
+  }
+  return slots;
+}
 
 function formatDate(d: string) {
   if (!d) return "";
@@ -46,17 +54,21 @@ const PROGRESS = ["Location", "Gender", "Category", "Service", "Date", "Time", "
 // whatever input was focused) and jump the page's scroll position while typing.
 function StepCard({
   num, title, children, step, fromCart, editStep, summary, setStepRef,
+  readOnly, expanded, onToggle,
 }: {
   num: number; title: string; children: React.ReactNode;
   step: number; fromCart: boolean; editStep: (n: number) => void;
   summary: string; setStepRef: (num: number, el: HTMLDivElement | null) => void;
+  // Gender/Category/Service steps don't apply to a cart checkout (services can
+  // span multiple categories/genders) — instead of the normal wizard behavior
+  // they're shown as done and, on click, expand a read-only summary of what
+  // the cart implies (rather than re-opening the pickers, which would wipe
+  // the cart-provided service list).
+  readOnly?: boolean; expanded?: boolean; onToggle?: () => void;
 }) {
-  const isActive    = step === num;
-  // Gender/Category/Service steps don't apply to a cart checkout (services can span
-  // multiple categories/genders) — keep them visually "done" but not re-editable,
-  // since editing would wipe the cart-provided service list.
-  const isCompleted = step > num && !(fromCart && [2, 3, 4].includes(num));
-  const isLocked    = step < num;
+  const isCompleted = readOnly ? true : step > num && !(fromCart && [2, 3, 4].includes(num));
+  const isActive     = readOnly ? !!expanded : step === num;
+  const isLocked     = !readOnly && step < num;
   return (
     <div
       ref={el => setStepRef(num, el)}
@@ -73,7 +85,7 @@ function StepCard({
     >
       {/* Header */}
       <div
-        onClick={() => isCompleted ? editStep(num) : undefined}
+        onClick={() => { if (!isCompleted) return; readOnly ? onToggle?.() : editStep(num); }}
         style={{
           display: "flex", alignItems: "center", gap: 14,
           padding: "16px 20px",
@@ -107,7 +119,7 @@ function StepCard({
           )}
         </div>
 
-        {/* Edit chip */}
+        {/* Edit / View chip */}
         {isCompleted && (
           <div style={{
             display: "flex", alignItems: "center", gap: 4,
@@ -115,7 +127,8 @@ function StepCard({
             background: "rgba(0,0,0,0.04)", borderRadius: 20, padding: "4px 10px",
             letterSpacing: "0.04em",
           }}>
-            <Edit2 size={11} /> Edit
+            {readOnly ? <ChevronRight size={11} style={{ transform: isActive ? "rotate(90deg)" : "none", transition: "transform 0.2s" }} /> : <Edit2 size={11} />}
+            {readOnly ? "View" : "Edit"}
           </div>
         )}
       </div>
@@ -181,8 +194,11 @@ export default function BookPage() {
   const [closeWarning, setCloseWarning] = useState(false);
   const [detailsError, setDetailsError] = useState("");
   const [fromCart, setFromCart]       = useState(false);
+  const [openInfoStep, setOpenInfoStep] = useState<number | null>(null);
   const [minBookingValue, setMinBookingValue] = useState(1100);
   const [maxPerSlot, setMaxPerSlot]   = useState(3);
+  const [bookingStartHour, setBookingStartHour] = useState(DEFAULT_BOOKING_START_HOUR);
+  const [bookingEndHour, setBookingEndHour]     = useState(DEFAULT_BOOKING_END_HOUR);
   const [bookedTimesForDate, setBookedTimesForDate] = useState<Record<string, number>>({});
   const [slotsLoading, setSlotsLoading] = useState(false);
   const [slotCheckFailed, setSlotCheckFailed] = useState(false);
@@ -192,6 +208,11 @@ export default function BookPage() {
   const todayStr = new Date().toISOString().split("T")[0];
   const maxBookableDate = new Date();
   maxBookableDate.setDate(maxBookableDate.getDate() + 7);
+
+  const TIME_SLOTS = useMemo(
+    () => buildTimeSlots(bookingStartHour, bookingEndHour),
+    [bookingStartHour, bookingEndHour]
+  );
 
   const MIN_LEAD_MINUTES = 60;
   const availableTimeSlots = TIME_SLOTS.filter(slot => {
@@ -212,6 +233,10 @@ export default function BookPage() {
       if (!isNaN(v) && v > 0) setMinBookingValue(v);
       const mp = parseInt(s.max_bookings_per_slot ?? "", 10);
       if (!isNaN(mp) && mp > 0) setMaxPerSlot(mp);
+      const sh = parseInt(s.booking_start_hour ?? "", 10);
+      if (!isNaN(sh) && sh >= 0 && sh < 24) setBookingStartHour(sh);
+      const eh = parseInt(s.booking_end_hour ?? "", 10);
+      if (!isNaN(eh) && eh >= 0 && eh < 24) setBookingEndHour(eh);
     });
   }, []);
 
@@ -397,6 +422,33 @@ export default function BookPage() {
       totalMins += parseDurationMinutes(found.duration);
     }
     return { rows: [...map.values()], totalMins };
+  })();
+
+  // For a cart checkout, gender/category aren't picked via steps 2-3 — services
+  // can span multiple categories and both genders. Derive what those steps would
+  // otherwise show from the categories the cart's services actually belong to.
+  const cartCategoryInfo = (() => {
+    const labels: string[] = [];
+    const genders = new Set<"female" | "male" | "both">();
+    for (const svc of services) {
+      const parts = svc.split(" — ");
+      const label = parts[parts.length - 1];
+      const cat = allCategories.find(c => c.label === label);
+      if (cat) {
+        if (!labels.includes(cat.label)) labels.push(cat.label);
+        genders.add(cat.gender);
+      }
+    }
+    return { labels, genders };
+  })();
+  const cartGenderInfo = (() => {
+    const g = cartCategoryInfo.genders;
+    // A "both" (unisex) category applies to either gender, so it lights up
+    // both pills — matching whichever specific genders are also present.
+    const showFemale = g.has("female") || g.has("both");
+    const showMale = g.has("male") || g.has("both");
+    const summary = showFemale && showMale ? "Both — Male & Female" : showFemale ? "Female" : showMale ? "Male" : "Unisex";
+    return { showFemale, showMale, summary };
   })();
 
   const fullAddress = [flatNo, street, landmark, city, pincode].filter(Boolean).join(", ");
@@ -985,41 +1037,106 @@ export default function BookPage() {
         </StepCard>
 
         {/* ─ STEP 2: GENDER ─ */}
-        <StepCard num={2} title="Select your preference" step={step} fromCart={fromCart} editStep={editStep} summary={summaries[2]} setStepRef={setStepRef}>
-          <div style={{ display: "flex", gap: 12 }}>
-            <div className={`gen-card ${gender === "female" ? "sel" : ""}`} onClick={() => { setGender("female"); advance(3); }}>
-              <div style={{ fontSize: 38 }}>♀</div>
-              <div style={{ fontWeight: 700, fontSize: 16, color: "#080808" }}>Female</div>
-              <div style={{ fontSize: 11, color: "#888" }}>Facials, waxing, makeup & more</div>
-              {gender === "female" && <div style={{ fontSize: 11, fontWeight: 700, color: "#2d8f5e" }}><Check size={11} style={{ display: "inline" }} /> Selected</div>}
+        <StepCard num={2} title="Select your preference" step={step} fromCart={fromCart} editStep={editStep}
+          summary={fromCart ? cartGenderInfo.summary : summaries[2]} setStepRef={setStepRef}
+          readOnly={fromCart} expanded={openInfoStep === 2} onToggle={() => setOpenInfoStep(s => s === 2 ? null : 2)}>
+          {fromCart ? (
+            <div style={{ display: "flex", gap: 12 }}>
+              <div className={`gen-card ${cartGenderInfo.showFemale ? "sel" : ""}`} style={{ cursor: "default" }}>
+                <div style={{ fontSize: 38 }}>♀</div>
+                <div style={{ fontWeight: 700, fontSize: 16, color: "#080808" }}>Female</div>
+                {cartGenderInfo.showFemale && <div style={{ fontSize: 11, fontWeight: 700, color: "#2d8f5e" }}><Check size={11} style={{ display: "inline" }} /> In your cart</div>}
+              </div>
+              <div className={`gen-card ${cartGenderInfo.showMale ? "sel" : ""}`} style={{ cursor: "default" }}>
+                <div style={{ fontSize: 38 }}>♂</div>
+                <div style={{ fontWeight: 700, fontSize: 16, color: "#080808" }}>Male</div>
+                {cartGenderInfo.showMale && <div style={{ fontSize: 11, fontWeight: 700, color: "#2d8f5e" }}><Check size={11} style={{ display: "inline" }} /> In your cart</div>}
+              </div>
             </div>
-            <div className={`gen-card ${gender === "male" ? "sel" : ""}`} onClick={() => { setGender("male"); advance(3); }}>
-              <div style={{ fontSize: 38 }}>♂</div>
-              <div style={{ fontWeight: 700, fontSize: 16, color: "#080808" }}>Male</div>
-              <div style={{ fontSize: 11, color: "#888" }}>Haircut, beard, grooming & more</div>
-              {gender === "male" && <div style={{ fontSize: 11, fontWeight: 700, color: "#2d8f5e" }}><Check size={11} style={{ display: "inline" }} /> Selected</div>}
+          ) : (
+            <div style={{ display: "flex", gap: 12 }}>
+              <div className={`gen-card ${gender === "female" ? "sel" : ""}`} onClick={() => { setGender("female"); advance(3); }}>
+                <div style={{ fontSize: 38 }}>♀</div>
+                <div style={{ fontWeight: 700, fontSize: 16, color: "#080808" }}>Female</div>
+                <div style={{ fontSize: 11, color: "#888" }}>Facials, waxing, makeup & more</div>
+                {gender === "female" && <div style={{ fontSize: 11, fontWeight: 700, color: "#2d8f5e" }}><Check size={11} style={{ display: "inline" }} /> Selected</div>}
+              </div>
+              <div className={`gen-card ${gender === "male" ? "sel" : ""}`} onClick={() => { setGender("male"); advance(3); }}>
+                <div style={{ fontSize: 38 }}>♂</div>
+                <div style={{ fontWeight: 700, fontSize: 16, color: "#080808" }}>Male</div>
+                <div style={{ fontSize: 11, color: "#888" }}>Haircut, beard, grooming & more</div>
+                {gender === "male" && <div style={{ fontSize: 11, fontWeight: 700, color: "#2d8f5e" }}><Check size={11} style={{ display: "inline" }} /> Selected</div>}
+              </div>
             </div>
-          </div>
+          )}
         </StepCard>
 
         {/* ─ STEP 3: CATEGORY ─ */}
-        <StepCard num={3} title="Choose a service category" step={step} fromCart={fromCart} editStep={editStep} summary={summaries[3]} setStepRef={setStepRef}>
-          <div className="cat-grid">
-            {visibleCats.map(cat => (
-              <div key={cat.id} className={`cat-btn ${selCat === cat.id ? "sel" : ""}`}
-                onClick={() => { setSelCat(cat.id); advance(4); }}>
-                <div className="cat-icon-ring">
-                  <img src={gender === "male" && cat.imgsMale?.[0] ? cat.imgsMale[0] : cat.imgs[0]} alt={cat.label} className="cat-icon-img" loading="lazy" />
+        <StepCard num={3} title="Choose a service category" step={step} fromCart={fromCart} editStep={editStep}
+          summary={fromCart ? cartCategoryInfo.labels.join(", ") : summaries[3]} setStepRef={setStepRef}
+          readOnly={fromCart} expanded={openInfoStep === 3} onToggle={() => setOpenInfoStep(s => s === 3 ? null : 3)}>
+          {fromCart ? (
+            <div style={{ display: "flex", flexWrap: "wrap", gap: 8 }}>
+              {cartCategoryInfo.labels.map(label => (
+                <div key={label} style={{
+                  display: "inline-flex", alignItems: "center", gap: 6,
+                  border: "1.5px solid #C9A84C", background: "rgba(201,168,76,0.07)",
+                  borderRadius: 20, padding: "7px 14px", fontSize: 12.5, fontWeight: 700, color: "#8a6a1a",
+                }}>
+                  <Check size={12} color="#2d8f5e" /> {label}
                 </div>
-                {cat.label}
-              </div>
-            ))}
-          </div>
+              ))}
+            </div>
+          ) : (
+            <div className="cat-grid">
+              {visibleCats.map(cat => (
+                <div key={cat.id} className={`cat-btn ${selCat === cat.id ? "sel" : ""}`}
+                  onClick={() => { setSelCat(cat.id); advance(4); }}>
+                  <div className="cat-icon-ring">
+                    <img src={gender === "male" && cat.imgsMale?.[0] ? cat.imgsMale[0] : cat.imgs[0]} alt={cat.label} className="cat-icon-img" loading="lazy" />
+                  </div>
+                  {cat.label}
+                </div>
+              ))}
+            </div>
+          )}
         </StepCard>
 
         {/* ─ STEP 4: SERVICE ─ */}
-        <StepCard num={4} title="Select a service" step={step} fromCart={fromCart} editStep={editStep} summary={summaries[4]} setStepRef={setStepRef}>
-          {selectedCat ? (
+        <StepCard num={4} title="Select a service" step={step} fromCart={fromCart} editStep={editStep}
+          summary={summaries[4]} setStepRef={setStepRef}
+          readOnly={fromCart} expanded={openInfoStep === 4} onToggle={() => setOpenInfoStep(s => s === 4 ? null : 4)}>
+          {fromCart ? (
+            <div>
+              <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+                {bookingSummary.rows.map((row, i) => (
+                  <div key={i} style={{
+                    display: "flex", alignItems: "center", justifyContent: "space-between", gap: 10,
+                    border: "1.5px solid rgba(0,0,0,0.07)", borderRadius: 10, padding: "10px 14px", background: "#FAFAF8",
+                  }}>
+                    <div style={{ display: "flex", alignItems: "center", gap: 8, minWidth: 0 }}>
+                      <Check size={14} color="#2d8f5e" style={{ flexShrink: 0 }} />
+                      <span style={{ fontSize: 13, fontWeight: 600, color: "#080808" }}>
+                        {row.name}{row.qty > 1 ? ` ×${row.qty}` : ""}
+                      </span>
+                    </div>
+                    <span style={{ fontSize: 13, fontWeight: 700, color: "#8a6a1a", flexShrink: 0 }}>
+                      ₹{(row.price * row.qty).toLocaleString()}
+                    </span>
+                  </div>
+                ))}
+              </div>
+              <div style={{
+                marginTop: 14, paddingTop: 14, borderTop: "1px dashed rgba(0,0,0,0.12)",
+                display: "flex", alignItems: "center", justifyContent: "space-between", gap: 10, flexWrap: "wrap",
+              }}>
+                <span style={{ fontSize: 12.5, color: "#888" }}>Forgot something? No problem.</span>
+                <a href="/#services" style={{ fontSize: 12.5, fontWeight: 700, color: "#C9A84C", textDecoration: "underline" }}>
+                  + Add More Services
+                </a>
+              </div>
+            </div>
+          ) : selectedCat ? (
             <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
               {selectedCat.services.map(svc => {
                 const val = svc.group
@@ -1468,7 +1585,14 @@ export default function BookPage() {
               <a className="bk2-submit" style={{ flex: 1, textDecoration: "none", textAlign: "center", background: "linear-gradient(135deg,#25d366,#128c7e)", color: "#fff", display: "flex", alignItems: "center", justifyContent: "center", gap: 8 }}
                 href={`https://wa.me/919999601212?text=Hi%20Bella%20%26%20Guy!%20I%20just%20booked%20${encodeURIComponent(booked.service)}%20for%20${encodeURIComponent(formatDate(booked.bookingDate))}.%20Please%20confirm.`}
                 target="_blank" rel="noopener noreferrer"
-                onClick={() => { setWaConfirmed(true); setCloseWarning(false); }}>
+                onClick={() => {
+                  setWaConfirmed(true);
+                  setCloseWarning(false);
+                  // WhatsApp opens in a new tab; send this tab back to the
+                  // homepage so re-opening the site never lands back on a
+                  // stale "booking submitted" screen.
+                  setTimeout(() => { window.location.href = "/"; }, 400);
+                }}>
                 Confirm on WhatsApp
               </a>
               <button style={{ padding: "13px 20px", borderRadius: 10, border: "1px solid rgba(0,0,0,0.12)", background: "transparent", fontSize: 13, fontWeight: 600, color: "rgba(0,0,0,0.4)", cursor: "pointer", fontFamily: "Inter,sans-serif" }}
