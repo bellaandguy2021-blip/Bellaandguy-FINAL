@@ -108,10 +108,9 @@ export default function LoginPage() {
       } else {
         setAttLeft(result.attemptsLeft);
         setError(
-          (result.attemptsLeft === 1
+          result.attemptsLeft === 1
             ? "Incorrect password. 1 attempt left before lockout!"
             : `Incorrect email or password. ${result.attemptsLeft} attempts left.`
-          ) + ` [debug: ${authErr.message}]`
         );
       }
       setLoading(false);
