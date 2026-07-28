@@ -70,6 +70,16 @@ export async function proxy(request: NextRequest) {
   const { pathname } = request.nextUrl;
   const role = request.cookies.get("bg_role")?.value;
 
+  // Canonicalize www → apex. Serving the same content on both hosts reads as
+  // duplicate content to search engines (flagged by an SEO audit) and splits
+  // ranking signals between two URLs instead of one.
+  const host = request.headers.get("host") || "";
+  if (host.startsWith("www.")) {
+    const canonicalUrl = new URL(request.nextUrl);
+    canonicalUrl.hostname = host.slice(4);
+    return NextResponse.redirect(canonicalUrl, 301);
+  }
+
   if (pathname.startsWith("/bg-secure-4x9k")) {
     if (!role || role !== "admin") {
       return NextResponse.redirect(new URL("/login", request.url));

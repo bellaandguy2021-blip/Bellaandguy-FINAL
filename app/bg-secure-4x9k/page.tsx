@@ -35,7 +35,7 @@ import {
   Info, X, FileText, AlertCircle, Star, Eye, Menu, Inbox, Phone as PhoneIcon,
   Settings as SettingsIcon, Building2, Mail, Save,
   Scissors, ImagePlus, Plus, Pencil, Layers, Loader2, Home, ChevronUp, ChevronDown, UserCheck, Tag as TagIcon, GripVertical,
-  Lock, Unlock,
+  Lock, Unlock, CreditCard,
 } from "lucide-react";
 
 // ── Types ──────────────────────────────────────────────
@@ -49,6 +49,7 @@ type Booking = {
   booking_date: string; booking_time: string;
   address?: string; status: string; staff?: string;
   is_home_service?: boolean; created_at?: string;
+  payment_status?: "none" | "partial" | "full"; amount_paid?: number;
 };
 
 async function sendEmailNotification(type: string, booking: Booking & { new_date?: string; new_time?: string }) {
@@ -133,6 +134,15 @@ const SETTING_GROUPS: { title: string; icon: any; keys: { key: string; label: st
       { key: "max_bookings_per_slot", label: "Max Bookings Per Time Slot", placeholder: "3 (how many customers can book the same 30-min slot before it's shown as full)" },
       { key: "booking_start_hour", label: "Booking Slots — Start Hour (24h, e.g. 10 = 10 AM)", placeholder: "10" },
       { key: "booking_end_hour",   label: "Booking Slots — End Hour (24h, e.g. 19 = 7 PM)",    placeholder: "19" },
+    ],
+  },
+  {
+    title: "Online Payments (Razorpay)",
+    icon: CreditCard,
+    keys: [
+      { key: "payment_enabled", label: "Enable Online Payment", placeholder: "" },
+      { key: "razorpay_key_id", label: "Razorpay Key ID", placeholder: "rzp_live_xxxxxxxxxxxx" },
+      { key: "min_payment_percent", label: "Minimum Advance Payment (%)", placeholder: "50 (customer must pay at least this % of the total online; they can always pay up to 100%)" },
     ],
   },
   {
@@ -3478,6 +3488,34 @@ export default function AdminPage() {
                           <p style={{ fontSize: 11, color: "#555", marginTop: 6 }}>
                             Each image here shows exactly as it will on the live homepage banner — add more than one and they'll auto-rotate.
                           </p>
+                        </div>
+                      ) : field.key === "payment_enabled" ? (
+                        <div key={field.key} style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 10 }}>
+                          <div>
+                            <label style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 13, fontWeight: 700, color: "#ddd", cursor: "pointer" }}>
+                              <input
+                                type="checkbox"
+                                checked={settings.payment_enabled === "true"}
+                                onChange={e => setSettings(p => ({ ...p, payment_enabled: e.target.checked ? "true" : "false" }))}
+                                style={{ width: 16, height: 16, accentColor: "#c9a84c" }}
+                              />
+                              Enable Online Payment
+                            </label>
+                            <p style={{ fontSize: 11, color: "#666", marginTop: 4, marginLeft: 24 }}>
+                              While off, booking works exactly as today — no payment step. Turn on only after
+                              filling in the Razorpay Key ID below and adding <code>RAZORPAY_KEY_SECRET</code> to
+                              the server's environment variables.
+                            </p>
+                          </div>
+                          <button
+                            className="btn bg"
+                            disabled={savingKey === field.key}
+                            onClick={() => saveSetting(field.key)}
+                            style={{ display: "inline-flex", alignItems: "center", gap: 5, whiteSpace: "nowrap", flexShrink: 0 }}
+                          >
+                            {savedKey === field.key ? <CheckCircle size={12} /> : <Save size={12} />}
+                            {savedKey === field.key ? "Saved" : savingKey === field.key ? "Saving…" : "Save"}
+                          </button>
                         </div>
                       ) : (
                         <div key={field.key} style={{ display: "flex", alignItems: "flex-end", gap: 10 }}>

@@ -1,11 +1,13 @@
 "use client";
 import { useState, useEffect } from "react";
 import { getPublicSettings } from "../lib/settings";
+import { useCart } from "./CartProvider";
 
 export default function WhatsAppButton() {
   const [hover, setHover] = useState(false);
   const [visible, setVisible] = useState(false);
   const [siteSettings, setSiteSettings] = useState<Record<string, string>>({});
+  const { count } = useCart();
 
   useEffect(() => {
     const timer = setTimeout(() => setVisible(true), 2000);
@@ -73,18 +75,26 @@ export default function WhatsAppButton() {
         }
 
         .wa-entry {
+          position: fixed; right: 32px; bottom: 32px; z-index: 999;
           opacity: 0;
           transform: translateY(20px) scale(0.8);
-          transition: opacity 0.5s ease, transform 0.5s cubic-bezier(0.34, 1.56, 0.64, 1);
+          transition: opacity 0.5s ease, transform 0.5s cubic-bezier(0.34, 1.56, 0.64, 1), bottom 0.3s ease;
         }
 
         .wa-entry.visible {
           opacity: 1;
           transform: translateY(0) scale(1);
         }
+
+        /* The mobile cart bar (MobileCartBar) sits fixed at the very bottom of the
+           screen once the cart has items — shift this button above it so they don't
+           overlap. Only matters below the cart bar's own breakpoint. */
+        @media (max-width: 768px) {
+          .wa-entry.cart-open { bottom: 96px; }
+        }
       `}</style>
 
-      <div className={`wa-entry ${visible ? "visible" : ""}`} style={{ position: "fixed", bottom: "32px", right: "32px", zIndex: 999 }}>
+      <div className={`wa-entry ${visible ? "visible" : ""} ${count > 0 ? "cart-open" : ""}`}>
         <div className="wa-pulse" />
         <a
           href={`https://wa.me/${waNumber}?text=${encodeURIComponent(waMessage)}`}

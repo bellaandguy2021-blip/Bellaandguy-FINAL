@@ -7,7 +7,7 @@ import { getDynamicCategories, mergeCategories } from "@/lib/dynamicServices";
 import {
   Store, Home, Check, User, Phone, Mail, MapPin,
   Clock, Star, X, Sparkles, Calendar, Edit2, ChevronRight,
-  MessageCircle, Navigation, Loader2
+  MessageCircle, Navigation, Loader2, CreditCard, ShieldCheck
 } from "lucide-react";
 import ReactCalendar from "react-calendar";
 import "react-calendar/dist/Calendar.css";
@@ -16,6 +16,7 @@ import { getPublicSettings } from "@/lib/settings";
 import { CART_CHECKOUT_KEY, parseDurationMinutes, formatMinutes } from "@/lib/cart";
 import { useCart } from "@/components/CartProvider";
 import { distanceKm, SERVICE_RADIUS_KM } from "@/lib/geo";
+import { loadRazorpayScript, openRazorpayCheckout } from "@/lib/razorpay";
 
 /* ── Time slots ────────────────────────────────────────────── */
 // Default window is 10 AM – 7 PM; admin-editable via Settings → Advanced
@@ -197,6 +198,16 @@ export default function BookPage() {
   const [openInfoStep, setOpenInfoStep] = useState<number | null>(null);
   const [minBookingValue, setMinBookingValue] = useState(1100);
   const [maxPerSlot, setMaxPerSlot]   = useState(3);
+  // Online payment (Razorpay) — off unless the admin has both enabled it and
+  // filled in a key ID. While off, booking behaves exactly as before (no
+  // payment step, confirmed via WhatsApp only).
+  const [paymentEnabled, setPaymentEnabled] = useState(false);
+  const [razorpayKeyId, setRazorpayKeyId]   = useState("");
+  const [minPaymentPercent, setMinPaymentPercent] = useState(50);
+  const [payAmountMode, setPayAmountMode] = useState<"full" | "min" | "custom">("full");
+  const [payCustomAmount, setPayCustomAmount] = useState<number | "">("");
+  const [paymentProcessing, setPaymentProcessing] = useState(false);
+  const [paymentError, setPaymentError] = useState("");
   const [bookingStartHour, setBookingStartHour] = useState(DEFAULT_BOOKING_START_HOUR);
   const [bookingEndHour, setBookingEndHour]     = useState(DEFAULT_BOOKING_END_HOUR);
   const [bookedTimesForDate, setBookedTimesForDate] = useState<Record<string, number>>({});
@@ -237,6 +248,12 @@ export default function BookPage() {
       if (!isNaN(sh) && sh >= 0 && sh < 24) setBookingStartHour(sh);
       const eh = parseInt(s.booking_end_hour ?? "", 10);
       if (!isNaN(eh) && eh >= 0 && eh < 24) setBookingEndHour(eh);
+      if (s.payment_enabled === "true" && s.razorpay_key_id) {
+        setPaymentEnabled(true);
+        setRazorpayKeyId(s.razorpay_key_id);
+      }
+      const pct = parseInt(s.min_payment_percent ?? "", 10);
+      if (!isNaN(pct) && pct > 0 && pct <= 100) setMinPaymentPercent(pct);
     });
   }, []);
 
@@ -548,9 +565,138 @@ export default function BookPage() {
     then?.();
   }
 
+  /* ── Payment (Razorpay) ──────────────────────────────
+     Only reachable when the admin has turned payment_enabled on and set a
+     Razorpay Key ID — see the settings fetch above. Amount must be between
+     minPaymentPercent% and 100% of the total. */
+  const payAmount = (() => {
+    const total = totalPrice ?? 0;
+    if (payAmountMode === "full") return total;
+    if (payAmountMode === "min") return Math.round(total * minPaymentPercent / 100);
+    return typeof payCustomAmount === "number" ? payCustomAmount : 0;
+  })();
+
+  async function finalizeBooking(paymentInfo?: {
+    payment_status: "partial" | "full";
+    amount_paid: number;
+    razorpay_order_id: string;
+    razorpay_payment_id: string;
+  }) {
+    const cleaned = phone.replace(/\D/g, "").replace(/^91/, "");
+    const { data: inserted, error } = await supabase
+      .from("appointments")
+      .insert([{
+        full_name: fullName, phone: cleaned, email: email || null,
+        service, booking_date: bookingDate, booking_time: bookingTime,
+        is_home_service: isHome, address: isHome ? fullAddress : null,
+        ...(paymentInfo ?? {}),
+      }])
+      .select("id").single();
+    if (error) throw error;
+
+    const bookingPayload = {
+      id: inserted?.id,
+      full_name: fullName, email, phone: cleaned,
+      service, booking_date: bookingDate, booking_time: bookingTime,
+      is_home_service: isHome, address: isHome ? fullAddress : null,
+    };
+
+    // Email notification
+    try {
+      await fetch("/api/send-email", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ type: "created", booking: bookingPayload }),
+      });
+    } catch {}
+
+    // WhatsApp notification to salon owner
+    try {
+      await fetch("/api/send-whatsapp", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ booking: bookingPayload }),
+      });
+    } catch {}
+
+    if (fromCart) clearCart();
+    setWaConfirmed(false);
+    setBooked({ id: inserted?.id, fullName, phone: cleaned, email, service, bookingDate, bookingTime, isHome, address: fullAddress });
+  }
+
+  async function initiatePayment() {
+    setPaymentError("");
+    const total = totalPrice ?? 0;
+    const minAllowed = Math.round(total * minPaymentPercent / 100);
+    if (payAmount < minAllowed || payAmount > total) {
+      setPaymentError(`Enter an amount between ₹${minAllowed.toLocaleString()} and ₹${total.toLocaleString()}.`);
+      return;
+    }
+
+    setPaymentProcessing(true);
+    try {
+      const scriptOk = await loadRazorpayScript();
+      if (!scriptOk) {
+        setPaymentError("Could not load the payment gateway. Please check your connection and try again.");
+        return;
+      }
+
+      const res = await fetch("/api/razorpay/create-order", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ amount: payAmount }),
+      });
+      const data = await res.json();
+      if (!res.ok) {
+        setPaymentError(data.error || "Could not start the payment. Please try again.");
+        return;
+      }
+
+      const cleanedForPrefill = phone.replace(/\D/g, "").replace(/^91/, "");
+      openRazorpayCheckout({
+        keyId: data.keyId,
+        orderId: data.orderId,
+        amountPaise: data.amount,
+        name: "Bella & Guy Salon",
+        description: payAmount >= total ? "Full payment for booking" : "Advance payment for booking",
+        prefill: { name: fullName, contact: cleanedForPrefill, email: email || undefined },
+        onSuccess: async (result) => {
+          setLoading(true);
+          try {
+            const verifyRes = await fetch("/api/razorpay/verify-payment", {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify(result),
+            });
+            const verifyData = await verifyRes.json();
+            if (!verifyData.verified) {
+              setPaymentError("Payment could not be verified. If money was deducted, please contact us with this reference: " + result.razorpay_payment_id);
+              return;
+            }
+            await finalizeBooking({
+              payment_status: payAmount >= total ? "full" : "partial",
+              amount_paid: payAmount,
+              razorpay_order_id: result.razorpay_order_id,
+              razorpay_payment_id: result.razorpay_payment_id,
+            });
+          } catch (err: any) {
+            setPaymentError("Payment succeeded but the booking couldn't be saved. Please contact us with this reference: " + result.razorpay_payment_id);
+          } finally {
+            setLoading(false);
+            setPaymentProcessing(false);
+          }
+        },
+        onDismiss: () => setPaymentProcessing(false),
+      });
+    } catch {
+      setPaymentError("Something went wrong starting the payment. Please try again.");
+      setPaymentProcessing(false);
+    }
+  }
+
   /* ── Submit ───────────────────────────────────────── */
   async function handleSubmit() {
-    setSpamError(""); setDetailsError("");
+    setSpamError(""); setDetailsError(""); setPaymentError("");
     if (honeypot) return;
     if (!fullName.trim()) { setDetailsError("Full name is required."); return; }
     const cleaned = phone.replace(/\D/g, "").replace(/^91/, "");
@@ -599,46 +745,14 @@ export default function BookPage() {
       return;
     }
 
+    if (paymentEnabled) {
+      await initiatePayment();
+      return;
+    }
+
     setLoading(true);
     try {
-      const { data: inserted, error } = await supabase
-        .from("appointments")
-        .insert([{
-          full_name: fullName, phone: cleaned, email: email || null,
-          service, booking_date: bookingDate, booking_time: bookingTime,
-          is_home_service: isHome, address: isHome ? fullAddress : null,
-        }])
-        .select("id").single();
-      if (error) throw error;
-
-      const bookingPayload = {
-        id: inserted?.id,
-        full_name: fullName, email, phone: cleaned,
-        service, booking_date: bookingDate, booking_time: bookingTime,
-        is_home_service: isHome, address: isHome ? fullAddress : null,
-      };
-
-      // Email notification
-      try {
-        await fetch("/api/send-email", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ type: "created", booking: bookingPayload }),
-        });
-      } catch {}
-
-      // WhatsApp notification to salon owner
-      try {
-        await fetch("/api/send-whatsapp", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ booking: bookingPayload }),
-        });
-      } catch {}
-
-      if (fromCart) clearCart();
-      setWaConfirmed(false);
-      setBooked({ id: inserted?.id, fullName, phone: cleaned, email, service, bookingDate, bookingTime, isHome, address: fullAddress });
+      await finalizeBooking();
     } catch (err: any) {
       alert("Booking failed: " + err.message);
     } finally {
@@ -782,6 +896,14 @@ export default function BookPage() {
         }
         .svc-card:hover { border-color: rgba(201,168,76,0.35); background: rgba(201,168,76,0.03); }
         .svc-card.sel { border-color: #C9A84C; background: rgba(201,168,76,0.07); }
+
+        /* Payment amount option cards */
+        .pay-opt {
+          flex: 1; border: 1.5px solid rgba(0,0,0,0.08); border-radius: 10px;
+          padding: 10px 12px; cursor: pointer; transition: all 0.2s; background: #fff;
+        }
+        .pay-opt:hover { border-color: rgba(201,168,76,0.4); }
+        .pay-opt.sel { border-color: #C9A84C; background: rgba(201,168,76,0.07); }
 
         /* Time slots */
         .time-grid {
@@ -1517,14 +1639,80 @@ export default function BookPage() {
             </div>
           )}
 
+          {/* Payment (only rendered when the admin has enabled it in Settings) */}
+          {paymentEnabled && totalPrice !== null && (
+            <div style={{ background: "#FAFAF8", border: "1.5px solid rgba(201,168,76,0.2)", borderRadius: 12, padding: "16px 14px", marginBottom: 14 }}>
+              <div style={{ fontSize: 11, fontWeight: 700, letterSpacing: "0.1em", textTransform: "uppercase", color: "#8a6a1a", marginBottom: 12, display: "flex", alignItems: "center", gap: 5 }}>
+                <CreditCard size={11} /> Pay Online
+              </div>
+              <div style={{ display: "flex", gap: 8, marginBottom: 10 }}>
+                <div
+                  className={`pay-opt ${payAmountMode === "full" ? "sel" : ""}`}
+                  onClick={() => setPayAmountMode("full")}
+                >
+                  <div style={{ fontSize: 12.5, fontWeight: 700 }}>Pay Full</div>
+                  <div style={{ fontSize: 14, fontWeight: 700, color: "#8a6a1a" }}>₹{totalPrice.toLocaleString()}</div>
+                </div>
+                <div
+                  className={`pay-opt ${payAmountMode === "min" ? "sel" : ""}`}
+                  onClick={() => setPayAmountMode("min")}
+                >
+                  <div style={{ fontSize: 12.5, fontWeight: 700 }}>Pay {minPaymentPercent}% Now</div>
+                  <div style={{ fontSize: 14, fontWeight: 700, color: "#8a6a1a" }}>₹{Math.round(totalPrice * minPaymentPercent / 100).toLocaleString()}</div>
+                </div>
+                <div
+                  className={`pay-opt ${payAmountMode === "custom" ? "sel" : ""}`}
+                  onClick={() => setPayAmountMode("custom")}
+                >
+                  <div style={{ fontSize: 12.5, fontWeight: 700 }}>Custom</div>
+                  <div style={{ fontSize: 11, color: "#999" }}>Choose amount</div>
+                </div>
+              </div>
+              {payAmountMode === "custom" && (
+                <div style={{ marginBottom: 4 }}>
+                  <label className="bk2-label">
+                    Amount (₹{Math.round(totalPrice * minPaymentPercent / 100).toLocaleString()} – ₹{totalPrice.toLocaleString()})
+                  </label>
+                  <input
+                    type="number"
+                    className="bk2-input"
+                    value={payCustomAmount}
+                    onChange={e => setPayCustomAmount(e.target.value === "" ? "" : Number(e.target.value))}
+                    placeholder={`e.g. ${Math.round(totalPrice * minPaymentPercent / 100)}`}
+                    min={Math.round(totalPrice * minPaymentPercent / 100)}
+                    max={totalPrice}
+                  />
+                </div>
+              )}
+              {payAmountMode !== "full" && (
+                <div style={{ fontSize: 11.5, color: "#888", marginTop: 6 }}>
+                  Balance of ₹{(totalPrice - payAmount).toLocaleString()} payable on-site.
+                </div>
+              )}
+              <div style={{ display: "flex", alignItems: "center", gap: 5, fontSize: 10.5, color: "#aaa", marginTop: 10 }}>
+                <ShieldCheck size={11} /> Secure payment powered by Razorpay
+              </div>
+            </div>
+          )}
+
+          {paymentError && (
+            <div style={{ background: "rgba(245,101,101,0.08)", border: "1px solid rgba(245,101,101,0.25)", borderRadius: 10, padding: "10px 14px", fontSize: 13, color: "#e53e3e", marginBottom: 12 }}>
+              ⚠ {paymentError}
+            </div>
+          )}
+
           {spamError && (
             <div style={{ background: "rgba(245,101,101,0.08)", border: "1px solid rgba(245,101,101,0.25)", borderRadius: 10, padding: "10px 14px", fontSize: 13, color: "#e53e3e", marginBottom: 12 }}>
               ⚠ {spamError}
             </div>
           )}
 
-          <button className="bk2-submit" disabled={loading} onClick={handleSubmit}>
-            {loading ? "Confirming..." : "✓  Confirm Booking"}
+          <button className="bk2-submit" disabled={loading || paymentProcessing} onClick={handleSubmit}>
+            {loading || paymentProcessing
+              ? "Please wait..."
+              : paymentEnabled
+                ? `✓  Pay ₹${payAmount.toLocaleString()} & Confirm Booking`
+                : "✓  Confirm Booking"}
           </button>
           <p style={{ textAlign: "center", color: "rgba(0,0,0,0.25)", fontSize: 11, marginTop: 10, marginBottom: 0 }}>
             We confirm via WhatsApp within 30 minutes

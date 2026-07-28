@@ -20,7 +20,7 @@ const Footer         = dynamic(() => import("@/components/Footer"));
 const WhatsAppButton = dynamic(() => import("@/components/WhatsAppButton"));
 const Divider        = dynamic(() => import("@/components/Divider"));
 
-const HOME_TITLE = "Bella & Guy Salon | Unisex Salon in Wave City, Ghaziabad";
+const HOME_TITLE = "Bella & Guy | Premium Unisex Salon in Wave City, Ghaziabad";
 const HOME_DESCRIPTION =
   "Bella & Guy is Wave City, Ghaziabad's trusted unisex salon — facials, waxing, hair color, manicure & grooming, at the salon or at your doorstep.";
 

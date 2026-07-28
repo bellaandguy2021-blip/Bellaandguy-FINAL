@@ -1,6 +1,7 @@
 "use client";
 import Link from "next/link";
 import { motion, AnimatePresence } from "framer-motion";
+import { usePathname } from "next/navigation";
 import { X, Trash2, ShoppingBag, Clock, ArrowRight, Minus, Plus, Eye } from "lucide-react";
 import { useCart } from "./CartProvider";
 import {
@@ -17,9 +18,15 @@ export default function CartModal({ onClose }: CartModalProps) {
   const { items, removeItem, setQuantity, totalPrice, minBookingValue } = useCart();
   const totalDuration = items.reduce((sum, i) => sum + parseDurationMinutes(i.duration) * i.quantity, 0);
   const belowMinimum = totalPrice > 0 && totalPrice < minBookingValue;
+  const pathname = usePathname();
+  // Cart items stay in the cart until a booking submits, so this modal can be
+  // opened while already mid-flow on /book — reloading there would wipe
+  // whatever step progress (date/time/details) the customer already made.
+  const onBookingFlow = pathname?.startsWith("/book");
 
   function handleCheckout() {
     if (belowMinimum) return;
+    if (onBookingFlow) { onClose(); return; }
     sessionStorage.setItem(CART_CHECKOUT_KEY, JSON.stringify(cartItemsToServiceStrings(items)));
     window.location.href = "/book";
   }
@@ -193,7 +200,7 @@ export default function CartModal({ onClose }: CartModalProps) {
                 </div>
               )}
               <button className="cm-checkout-btn" onClick={handleCheckout} disabled={belowMinimum}>
-                Proceed to Booking <ArrowRight size={15} />
+                {onBookingFlow ? "Back to Booking" : "Proceed to Booking"} <ArrowRight size={15} />
               </button>
               <button className="cm-continue-btn" onClick={onClose}>Continue Shopping</button>
             </div>

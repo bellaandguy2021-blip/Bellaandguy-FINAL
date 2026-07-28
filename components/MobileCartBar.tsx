@@ -1,16 +1,29 @@
 "use client";
 import { AnimatePresence, motion } from "framer-motion";
 import { ArrowRight } from "lucide-react";
+import { usePathname } from "next/navigation";
 import { useCart } from "./CartProvider";
 import { cartItemsToServiceStrings, CART_CHECKOUT_KEY } from "@/lib/cart";
 
 export default function MobileCartBar() {
-  const { items, count, totalPrice, openCart } = useCart();
+  const { items, count, totalPrice, openCart, minBookingValue } = useCart();
+  const pathname = usePathname();
+  const belowMinimum = totalPrice > 0 && totalPrice < minBookingValue;
+  // Cart items stay in the cart until a booking actually submits, so this bar
+  // would otherwise float over the whole /book flow — clicking "Proceed to
+  // Booking" there did a full page reload back to the cart-checkout entry
+  // step, wiping out whatever progress (date/time/details) the customer had
+  // already made. There's nowhere further to "proceed" to once already in
+  // the booking flow, so just don't show it there.
+  const onBookingFlow = pathname?.startsWith("/book");
 
   function handleCheckout() {
+    if (belowMinimum) { openCart(); return; }
     sessionStorage.setItem(CART_CHECKOUT_KEY, JSON.stringify(cartItemsToServiceStrings(items)));
     window.location.href = "/book";
   }
+
+  if (onBookingFlow) return null;
 
   return (
     <>
@@ -32,6 +45,11 @@ export default function MobileCartBar() {
             background: linear-gradient(135deg, #E8C96D, #C9A84C); color: #080808; border: none;
             border-radius: 10px; padding: 12px 18px; font-size: 12.5px; font-weight: 700;
             letter-spacing: 0.04em; font-family: 'Inter', sans-serif; cursor: pointer; flex-shrink: 0;
+            white-space: nowrap;
+          }
+          .mcb-btn.mcb-btn-low {
+            background: rgba(245,101,101,0.15); color: #f5a5a5;
+            border: 1px solid rgba(245,101,101,0.35);
           }
         }
       `}</style>
@@ -48,8 +66,9 @@ export default function MobileCartBar() {
               <span className="mcb-count">{count} Service{count !== 1 ? "s" : ""}</span>
               <span className="mcb-price">₹{totalPrice.toLocaleString()}</span>
             </div>
-            <button className="mcb-btn" onClick={handleCheckout}>
-              Proceed to Booking <ArrowRight size={14} />
+            <button className={`mcb-btn ${belowMinimum ? "mcb-btn-low" : ""}`} onClick={handleCheckout}>
+              {belowMinimum ? `Add ₹${(minBookingValue - totalPrice).toLocaleString()} more` : "Proceed to Booking"}
+              <ArrowRight size={14} />
             </button>
           </motion.div>
         )}
