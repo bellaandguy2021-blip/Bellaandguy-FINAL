@@ -4,10 +4,12 @@ import { useRouter } from "next/navigation";
 import { motion, AnimatePresence } from "framer-motion";
 import {
   Check, Clock, Sparkles, ShieldCheck, Sun, Droplets,
-  ChevronDown, ChevronLeft, ChevronRight, ArrowRight, TrendingUp, ListChecks, ArrowLeft,
+  ChevronDown, ChevronLeft, ChevronRight, ArrowRight, TrendingUp, ListChecks, ArrowLeft, ShoppingCart, Phone,
 } from "lucide-react";
 import type { Category, ServiceItem } from "@/lib/servicesData";
 import { productBrands } from "@/lib/servicesData";
+import { useCart } from "./CartProvider";
+import { cartItemKey } from "@/lib/cart";
 import InquiryButton from "./InquiryButton";
 
 interface ServiceDetailProps {
@@ -18,10 +20,39 @@ interface ServiceDetailProps {
 
 export default function ServiceDetail({ category, service, gender }: ServiceDetailProps) {
   const router = useRouter();
+  const { addItem, justAddedKey } = useCart();
+  const [addingKey, setAddingKey] = useState<string | null>(null);
+
   function handleBack() {
     if (typeof window !== "undefined" && window.history.length > 1) router.back();
     else router.push("/#services");
   }
+
+  function handleAddToCart() {
+    if (!category.homeService) {
+      window.location.href = "tel:+919999601212";
+      return;
+    }
+    const key = cartItemKey(category.id, service.name, service.group);
+    setAddingKey(key);
+    setTimeout(() => {
+      addItem({
+        key,
+        name: service.name,
+        categoryId: category.id,
+        categoryLabel: category.label,
+        group: service.group,
+        price: service.discountPercent
+          ? Math.round(service.price * (1 - service.discountPercent / 100))
+          : service.price,
+        duration: service.duration,
+      });
+      setAddingKey(k => (k === key ? null : k));
+    }, 260);
+  }
+
+  const cartKey = cartItemKey(category.id, service.name, service.group);
+  const isAdded = justAddedKey === cartKey || addingKey === cartKey;
   const hasProductGallery = !!service.gallery?.length;
   const gallery = hasProductGallery
     ? service.gallery!
@@ -43,14 +74,6 @@ export default function ServiceDetail({ category, service, gender }: ServiceDeta
   const discountedPrice = hasDiscount ? Math.round(service.price * (1 - service.discountPercent! / 100)) : service.price;
   const hasBeforeAfter = !!(service.beforeImages?.length && service.afterImages?.length);
   const allFaqs = [...(service.faqs ?? []), ...(category.faqs ?? [])];
-
-  function handleBookNow() {
-    const key = service.group ? `${service.group} – ${service.name}` : service.name;
-    localStorage.setItem("preselectService", `${key} — ${category.label}`);
-    localStorage.setItem("preselectGender", gender);
-    sessionStorage.setItem("bookingType", "home");
-    window.location.href = "/book";
-  }
 
   return (
     <>
@@ -335,9 +358,20 @@ export default function ServiceDetail({ category, service, gender }: ServiceDeta
           </div>
           <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
             <InquiryButton service={`${service.group ? `${service.group} – ${service.name}` : service.name} — ${category.label}`} gender={gender} />
-            <button className="sd-book-btn" onClick={handleBookNow}>
-              Book Home Service <ArrowRight size={15} />
-            </button>
+            {category.homeService ? (
+              <button
+                className="sd-book-btn"
+                onClick={handleAddToCart}
+                disabled={isAdded}
+                style={isAdded ? { background: "linear-gradient(135deg,#6fe0a0,#2d8f5e)", color: "#fff" } : undefined}
+              >
+                {isAdded ? <><Check size={15} /> Added</> : <><ShoppingCart size={15} /> Add to Cart</>}
+              </button>
+            ) : (
+              <button className="sd-book-btn" onClick={handleAddToCart}>
+                <Phone size={15} /> Call to Book
+              </button>
+            )}
           </div>
         </div>
       </main>
