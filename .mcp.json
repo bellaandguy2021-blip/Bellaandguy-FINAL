@@ -1,0 +1,29 @@
+{
+  "mcpServers": {
+    "hostinger-hosting": {
+      "command": "npx.cmd",
+      "args": ["--package=hostinger-api-mcp@latest", "hostinger-hosting-mcp"],
+      "env": { "HOSTINGER_API_TOKEN": "fSFiDHC2LWt4GU7IhuKs4eQ9uxpfnr70oglE4xbbf65ec166" }
+    },
+    "hostinger-domains": {
+      "command": "npx.cmd",
+      "args": ["--package=hostinger-api-mcp@latest", "hostinger-domains-mcp"],
+      "env": { "HOSTINGER_API_TOKEN": "fSFiDHC2LWt4GU7IhuKs4eQ9uxpfnr70oglE4xbbf65ec166" }
+    },
+    "hostinger-dns": {
+      "command": "npx.cmd",
+      "args": ["--package=hostinger-api-mcp@latest", "hostinger-dns-mcp"],
+      "env": { "HOSTINGER_API_TOKEN": "fSFiDHC2LWt4GU7IhuKs4eQ9uxpfnr70oglE4xbbf65ec166" }
+    },
+    "hostinger-billing": {
+      "command": "npx.cmd",
+      "args": ["--package=hostinger-api-mcp@latest", "hostinger-billing-mcp"],
+      "env": { "HOSTINGER_API_TOKEN": "fSFiDHC2LWt4GU7IhuKs4eQ9uxpfnr70oglE4xbbf65ec166" }
+    },
+    "hostinger-reach": {
+      "command": "npx.cmd",
+      "args": ["--package=hostinger-api-mcp@latest", "hostinger-reach-mcp"],
+      "env": { "HOSTINGER_API_TOKEN": "fSFiDHC2LWt4GU7IhuKs4eQ9uxpfnr70oglE4xbbf65ec166" }
+    }
+  }
+}

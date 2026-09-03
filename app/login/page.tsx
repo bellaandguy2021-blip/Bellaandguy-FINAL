@@ -141,8 +141,9 @@ export default function LoginPage() {
   async function sendResetLink(e: React.FormEvent) {
     e.preventDefault();
     setForgotLoading(true);
+    const origin = typeof window !== "undefined" ? window.location.origin : "";
     await supabase.auth.resetPasswordForEmail(forgotEmail, {
-      redirectTo: `${window.location.origin}/reset-password`,
+      redirectTo: `${origin}/reset-password`,
     });
     setForgotLoading(false);
     setForgotSent(true);
