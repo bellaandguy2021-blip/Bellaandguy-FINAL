@@ -6,6 +6,7 @@ import InquiryButton from "@/components/InquiryButton";
 import JsonLd from "@/components/JsonLd";
 import { buildMetadata } from "@/lib/seo";
 import { webPageSchema, faqSchema, reviewsSchema, breadcrumbSchema } from "@/lib/schema";
+import { getPublicSettings } from "@/lib/settings";
 import { getFaqs, getTestimonials } from "@/lib/homepageContent";
 
 const MarqueeTicker  = dynamic(() => import("@/components/MarqueeTicker"));
@@ -42,7 +43,7 @@ export function generateMetadata(): Promise<Metadata> {
 export default async function Home() {
   // Live content for structured data — the same Supabase rows the visible
   // sections render, so schema and page never drift apart.
-  const [faqs, testimonials] = await Promise.all([getFaqs(), getTestimonials()]);
+  const [faqs, testimonials, settings] = await Promise.all([getFaqs(), getTestimonials(), getPublicSettings()]);
 
   return (
     <main id="main-content">
@@ -53,7 +54,7 @@ export default async function Home() {
         reviewsSchema(testimonials.map(t => ({ name: t.name, review: t.review, rating: t.rating }))),
       ]} />
       <Navbar />
-      <Hero />
+      <Hero initialSettings={settings} />
       <section style={{ background: "#080808", padding: "56px 24px", textAlign: "center" }}>
         <div style={{ maxWidth: 720, margin: "0 auto" }}>
           <h2 style={{

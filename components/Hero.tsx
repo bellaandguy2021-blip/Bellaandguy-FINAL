@@ -56,14 +56,12 @@ const PARTICLES = [
   { size: 2, x: 94, y: 55, dur: 8.5, delay: 1.8  },
 ];
 
-export default function Hero() {
+export default function Hero({ initialSettings = {} }: { initialSettings?: Record<string, string> }) {
   const [textVisible, setTextVisible]   = useState(false);
   const [statsVisible, setStatsVisible] = useState(false);
   const [mounted, setMounted]           = useState(false);
-  const [s, setS] = useState<Record<string, string>>({});
+  const s = initialSettings;
   const bgRef = useRef<HTMLDivElement>(null);
-
-  useEffect(() => { getPublicSettings().then(setS); }, []);
 
   const badge = s.hero_badge || "Wave City's Premium Home Beauty Service";
   const heading1 = s.hero_heading_1 || "Premium";
