@@ -39,7 +39,7 @@ import {
 } from "lucide-react";
 
 // ── Types ──────────────────────────────────────────────
-type Tab = "dashboard" | "bookings" | "revenue" | "staff" | "contacts" | "inquiries" | "customers" | "services" | "homepage" | "seo" | "settings" | "backup" | "logs";
+type Tab = "dashboard" | "bookings" | "revenue" | "staff" | "contacts" | "inquiries" | "customers" | "services" | "homepage" | "seo" | "settings" | "backup" | "logs" | "profile";
 type ConfirmModal = { title: string; message: string; onConfirm: () => void; confirmLabel?: string; icon?: React.ReactNode; danger?: boolean } | null;
 type FilterType = "all" | "today" | "week" | "month";
 type TypeFilter = "all" | "salon" | "home";
@@ -1843,6 +1843,7 @@ export default function AdminPage() {
     ["settings",  <SettingsIcon size={16} />,    "Settings", 0],
     ["backup",    <Database size={16} />,         "Backup", 0],
     ["logs",      <Activity size={16} />,         "Activity", activityLogs.length],
+    ["profile",   <UserCheck size={16} />,       "Profile", 0],
   ];
 
   return (
@@ -3744,6 +3745,96 @@ export default function AdminPage() {
                 </div>
               )}
             </>)}
+
+            {/* ── PROFILE TAB ── */}
+            {activeTab === "profile" && (
+              <div style={{ maxWidth: 560, display: "flex", flexDirection: "column", gap: 16 }}>
+                <div style={{ background: "rgba(255,255,255,0.02)", border: "1px solid rgba(255,255,255,0.06)", borderRadius: 14, overflow: "hidden" }}>
+                  <div style={{ display: "flex", alignItems: "center", gap: 10, padding: "14px 18px", borderBottom: "1px solid rgba(255,255,255,0.05)" }}>
+                    <UserCheck size={15} color="#c9a84c" />
+                    <span style={{ fontSize: 13.5, fontWeight: 700, color: "#ddd" }}>My Profile</span>
+                  </div>
+                  <div style={{ padding: 18, display: "flex", flexDirection: "column", gap: 12 }}>
+                    <div style={{ display: "flex", alignItems: "flex-end", gap: 10 }}>
+                      <div style={{ flex: 1 }}>
+                        <label style={{ display: "block", fontSize: 10.5, fontWeight: 700, letterSpacing: "0.06em", textTransform: "uppercase", color: "#666", marginBottom: 6 }}>Name</label>
+                        <input type="text" value={currentStaff?.name ?? ""} onChange={e => setCurrentStaff(s => s ? { ...s, name: e.target.value } : s)} style={{ width: "100%", background: "rgba(255,255,255,0.03)", border: "1px solid rgba(255,255,255,0.08)", borderRadius: 8, padding: "9px 12px", color: "#eee", fontSize: 13, fontFamily: "inherit" }} />
+                      </div>
+                    </div>
+                    <div style={{ display: "flex", alignItems: "flex-end", gap: 10 }}>
+                      <div style={{ flex: 1 }}>
+                        <label style={{ display: "block", fontSize: 10.5, fontWeight: 700, letterSpacing: "0.06em", textTransform: "uppercase", color: "#666", marginBottom: 6 }}>Email</label>
+                        <input type="email" value={currentStaff?.email ?? ""} onChange={e => setCurrentStaff(s => s ? { ...s, email: e.target.value } : s)} style={{ width: "100%", background: "rgba(255,255,255,0.03)", border: "1px solid rgba(255,255,255,0.08)", borderRadius: 8, padding: "9px 12px", color: "#eee", fontSize: 13, fontFamily: "inherit" }} />
+                      </div>
+                    </div>
+                    <div style={{ display: "flex", alignItems: "flex-end", gap: 10 }}>
+                      <div style={{ flex: 1 }}>
+                        <label style={{ display: "block", fontSize: 10.5, fontWeight: 700, letterSpacing: "0.06em", textTransform: "uppercase", color: "#666", marginBottom: 6 }}>Role</label>
+                        <input type="text" value={currentStaff?.role ?? ""} readOnly style={{ width: "100%", background: "rgba(255,255,255,0.03)", border: "1px solid rgba(255,255,255,0.08)", borderRadius: 8, padding: "9px 12px", color: "#888", fontSize: 13, fontFamily: "inherit", opacity: 0.6 }} />
+                      </div>
+                    </div>
+                    <button className="btn bg" onClick={async () => {
+                      if (!currentStaff) return;
+                      const { error } = await supabase.from("staff").update({ name: currentStaff.name, email: currentStaff.email }).eq("id", currentStaff.id);
+                      if (error) { notify(error.message, 5000); return; }
+                      notify("Profile updated successfully");
+                      if (!currentStaff?.email) { notify("No email to refresh", 4000); return; }
+                      const sd = await supabase.from("staff").select("*").ilike("email", currentStaff.email).single();
+                      if (sd.data) { setCurrentStaff(sd.data); currentStaffRef.current = sd.data; }
+                    }} style={{ display: "inline-flex", alignItems: "center", gap: 5 }}>
+                      <Save size={12} /> Save Profile
+                    </button>
+                  </div>
+                </div>
+
+                <div style={{ background: "rgba(255,255,255,0.02)", border: "1px solid rgba(255,255,255,0.06)", borderRadius: 14, overflow: "hidden" }}>
+                  <div style={{ display: "flex", alignItems: "center", gap: 10, padding: "14px 18px", borderBottom: "1px solid rgba(255,255,255,0.05)" }}>
+                    <Lock size={15} color="#c9a84c" />
+                    <span style={{ fontSize: 13.5, fontWeight: 700, color: "#ddd" }}>Change Password</span>
+                  </div>
+                  <div style={{ padding: 18, display: "flex", flexDirection: "column", gap: 12 }}>
+                    <div style={{ display: "flex", alignItems: "flex-end", gap: 10 }}>
+                      <div style={{ flex: 1 }}>
+                        <label style={{ display: "block", fontSize: 10.5, fontWeight: 700, letterSpacing: "0.06em", textTransform: "uppercase", color: "#666", marginBottom: 6 }}>Current Password</label>
+                        <input type="password" id="pw-current" placeholder="Enter current password" style={{ width: "100%", background: "rgba(255,255,255,0.03)", border: "1px solid rgba(255,255,255,0.08)", borderRadius: 8, padding: "9px 12px", color: "#eee", fontSize: 13, fontFamily: "inherit" }} />
+                      </div>
+                    </div>
+                    <div style={{ display: "flex", alignItems: "flex-end", gap: 10 }}>
+                      <div style={{ flex: 1 }}>
+                        <label style={{ display: "block", fontSize: 10.5, fontWeight: 700, letterSpacing: "0.06em", textTransform: "uppercase", color: "#666", marginBottom: 6 }}>New Password</label>
+                        <input type="password" id="pw-new" placeholder="New password (min 6 chars)" minLength={6} style={{ width: "100%", background: "rgba(255,255,255,0.03)", border: "1px solid rgba(255,255,255,0.08)", borderRadius: 8, padding: "9px 12px", color: "#eee", fontSize: 13, fontFamily: "inherit" }} />
+                      </div>
+                    </div>
+                    <div style={{ display: "flex", alignItems: "flex-end", gap: 10 }}>
+                      <div style={{ flex: 1 }}>
+                        <label style={{ display: "block", fontSize: 10.5, fontWeight: 700, letterSpacing: "0.06em", textTransform: "uppercase", color: "#666", marginBottom: 6 }}>Confirm New Password</label>
+                        <input type="password" id="pw-confirm" placeholder="Re-enter new password" minLength={6} style={{ width: "100%", background: "rgba(255,255,255,0.03)", border: "1px solid rgba(255,255,255,0.08)", borderRadius: 8, padding: "9px 12px", color: "#eee", fontSize: 13, fontFamily: "inherit" }} />
+                      </div>
+                    </div>
+                    <button className="btn bg" onClick={async () => {
+                      const cur = (document.getElementById("pw-current") as HTMLInputElement).value;
+                      const nw = (document.getElementById("pw-new") as HTMLInputElement).value;
+                      const cf = (document.getElementById("pw-confirm") as HTMLInputElement).value;
+                      if (!cur || !nw || !cf) { notify("All password fields are required", 4000); return; }
+                      if (nw.length < 6) { notify("New password must be at least 6 characters", 4000); return; }
+                      if (nw !== cf) { notify("New passwords do not match", 4000); return; }
+                      if (!currentStaff?.email) { notify("No email on file", 4000); return; }
+                      const { data: sd, error: fetchErr } = await supabase.from("staff").select("*").ilike("email", currentStaff.email).single();
+                      if (fetchErr || !sd) { notify("Unable to verify current credentials", 4000); return; }
+                      if (sd.password !== cur) { notify("Current password is incorrect", 4000); return; }
+                      const { error } = await supabase.from("staff").update({ password: nw }).eq("id", sd.id);
+                      if (error) { notify(error.message, 5000); return; }
+                      notify("Password updated successfully");
+                      (document.getElementById("pw-current") as HTMLInputElement).value = "";
+                      (document.getElementById("pw-new") as HTMLInputElement).value = "";
+                      (document.getElementById("pw-confirm") as HTMLInputElement).value = "";
+                    }} style={{ display: "inline-flex", alignItems: "center", gap: 5 }}>
+                      <Lock size={12} /> Update Password
+                    </button>
+                  </div>
+                </div>
+              </div>
+            )}
 
           </div>
         </div>
