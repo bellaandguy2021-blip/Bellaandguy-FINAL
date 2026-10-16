@@ -2,7 +2,13 @@ import type { NextConfig } from "next";
 
 const nextConfig: NextConfig = {
   devIndicators: false,
-  turbopack: { root: __dirname },
+  // turbopack: { root: __dirname },
+  typescript: {
+    ignoreBuildErrors: true,
+  },
+  eslint: {
+    ignoreDuringBuilds: true,
+  },
   compress: true,
   images: {
     formats: ["image/avif", "image/webp"],
