@@ -42,6 +42,7 @@ import {
 type Tab = "dashboard" | "bookings" | "revenue" | "staff" | "contacts" | "inquiries" | "customers" | "services" | "homepage" | "seo" | "settings" | "backup" | "logs" | "profile";
 type ConfirmModal = { title: string; message: string; onConfirm: () => void; confirmLabel?: string; icon?: React.ReactNode; danger?: boolean } | null;
 type FilterType = "all" | "today" | "week" | "month";
+type PaymentFilter = "all" | "paid" | "partial" | "unpaid";
 type TypeFilter = "all" | "salon" | "home";
 
 type Booking = {
@@ -598,6 +599,7 @@ export default function AdminPage() {
   const [search, setSearch]       = useState("");
   const [filter, setFilter]       = useState<FilterType>("all");
   const [typeFilter, setTypeFilter] = useState<TypeFilter>("all");
+  const [paymentFilter, setPaymentFilter] = useState<PaymentFilter>("all");
   const [inquirySearch, setInquirySearch] = useState("");
   const [inquiryStatusFilter, setInquiryStatusFilter] = useState<string>("all");
   const [selectedBooking, setSelectedBooking] = useState<Booking | null>(null);
@@ -1462,6 +1464,11 @@ export default function AdminPage() {
     // Type filter: salon = no address, home = has address
     if (typeFilter === "salon" && b.address) return false;
     if (typeFilter === "home"  && !b.address) return false;
+    // Payment filter
+    if (paymentFilter === "paid" && b.payment_status !== "full") return false;
+    if (paymentFilter === "partial" && b.payment_status !== "partial") return false;
+    if (paymentFilter === "unpaid" && b.payment_status !== "none") return false;
+
     if (filter === "today") return m && b.booking_date === today;
     if (filter === "week")  {
       const d = new Date(b.booking_date); const now = new Date();
@@ -1470,7 +1477,7 @@ export default function AdminPage() {
     }
     if (filter === "month") return m && b.booking_date?.slice(0,7) === thisMonth;
     return m;
-  }), [bookings, search, filter, typeFilter]);
+  }), [bookings, search, filter, typeFilter, paymentFilter]);
 
   const filteredInquiries = useMemo(() => inquiries.filter(i => {
     const q = inquirySearch.toLowerCase().trim();
@@ -2177,6 +2184,16 @@ export default function AdminPage() {
                   <option value="salon">🏪 At Salon</option>
                   <option value="home">🏠 Home Service</option>
                 </select>
+                <select
+                  className={`type-sel ${paymentFilter!=="all"?"active":""}`}
+                  value={paymentFilter}
+                  onChange={e => setPaymentFilter(e.target.value as PaymentFilter)}
+                >
+                  <option value="all">All Payments</option>
+                  <option value="paid">✅ Fully Paid</option>
+                  <option value="partial">⚠️ Partial/Advance</option>
+                  <option value="unpaid">❌ Unpaid</option>
+                </select>
                 {isAdmin && <button className="btn bg" onClick={pdfAppointments} style={{display:"inline-flex",alignItems:"center",gap:4}}><Download size={12}/>PDF</button>}
                 {isAdmin && <button className="btn bg" onClick={csvExport} style={{display:"inline-flex",alignItems:"center",gap:4}}><Download size={12}/>CSV</button>}
               </div>
@@ -2184,14 +2201,17 @@ export default function AdminPage() {
               <div className="tw">
                 <table>
                   <thead><tr>
-                    {["Booking #","Client","Phone","Service","Date","Time","Type","Status","Staff","Price","Actions"].map(h=><th key={h}>{h}</th>)}
+                    {["Booking #","Client","Phone","Service","Date","Time","Type","Status","Staff","Price","Paid","Balance","Actions"].map(h=><th key={h}>{h}</th>)}
                   </tr></thead>
                   <tbody>
                     {filteredBookings.length === 0
-                      ? <tr className="empty"><td colSpan={11}>No bookings found</td></tr>
+                      ? <tr className="empty"><td colSpan={13}>No bookings found</td></tr>
                       : filteredBookings.map((b, i) => {
                           const sc = STATUS_CONFIG[b.status] || STATUS_CONFIG["Pending"];
                           const isCancelled = b.status === "Cancelled";
+                          const total = price(b) || 0;
+                          const paid = b.amount_paid || 0;
+                          const balance = total - paid;
                           return (
                             <tr key={b.id} style={isCancelled ? { opacity: 0.45, background: "rgba(245,101,101,0.03)", boxShadow: "inset 3px 0 0 rgba(245,101,101,0.5)" } : {}}>
                               <td style={{ color:"#c9a84c",fontSize:10,fontFamily:"monospace",fontWeight:600,whiteSpace:"nowrap" }}>BG-{String(b.id).padStart(5,"0")}</td>
@@ -2235,6 +2255,12 @@ export default function AdminPage() {
                                 }
                               </td>
                               <td style={{ color:"#4fd080",fontWeight:600,fontSize:12 }}>{price(b)?`₹${price(b).toLocaleString()}`:"—"}</td>
+                              <td style={{ fontSize: 12, fontWeight: 600, color: b.payment_status === 'full' ? '#4fd080' : b.payment_status === 'partial' ? '#f5c75a' : '#bbb' }}>
+                                {b.payment_status === 'none' ? '—' : `₹${paid.toLocaleString()}`}
+                              </td>
+                              <td style={{ fontSize: 12, fontWeight: 600, color: '#eee' }}>
+                                {balance > 0 ? `₹${balance.toLocaleString()}` : '—'}
+                              </td>
                               <td style={{ whiteSpace:"nowrap" }}>
                                 <div className="aw">
                                   <div className="aw-row">
